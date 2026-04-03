@@ -24,8 +24,6 @@ PY_BASE="https://github.com/astral-sh/python-build-standalone/releases/download/
 PY_ARM64_URL="${PY_BASE}/cpython-${PY_VER}%2B${PY_TAG}-aarch64-apple-darwin-install_only.tar.gz"
 PY_X86_URL="${PY_BASE}/cpython-${PY_VER}%2B${PY_TAG}-x86_64-apple-darwin-install_only.tar.gz"
 
-# Short Python version for pip (e.g. 313)
-PY_SHORT="313"
 # -----------------------------------------------------------------------------
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -100,50 +98,25 @@ tar -xzf "$X86_TGZ" -C "$APP_DIR/python-x86_64" --strip-components=1
 
 # -----------------------------------------------------------------------------
 # Download wheels for arm64
+# Each standalone Python downloads its own native wheels — no cross-platform
+# resolver tricks that cause conflicts.
 # -----------------------------------------------------------------------------
 info "Downloading wheels for arm64..."
 "$APP_DIR/python-arm64/bin/python3" -m pip download \
-    --platform "macosx_11_0_arm64" \
-    --python-version "$PY_SHORT" \
-    --implementation cp \
-    --abi "cp${PY_SHORT}" \
-    --only-binary :all: \
     --dest "$APP_DIR/wheels/arm64/" \
     -r "$APP_DIR/requirements_full.txt" \
     --quiet
-
-# Pure-Python packages don't have platform-specific wheels — grab any remaining
-"$APP_DIR/python-arm64/bin/python3" -m pip download \
-    --platform "macosx_11_0_arm64" \
-    --python-version "$PY_SHORT" \
-    --implementation cp \
-    --abi "cp${PY_SHORT}" \
-    --dest "$APP_DIR/wheels/arm64/" \
-    -r "$APP_DIR/requirements_full.txt" \
-    --quiet 2>/dev/null || true
 
 # -----------------------------------------------------------------------------
 # Download wheels for x86_64
+# On Apple Silicon the x86_64 binary runs via Rosetta automatically,
+# so pip will correctly resolve x86_64-native wheels.
 # -----------------------------------------------------------------------------
 info "Downloading wheels for x86_64..."
 "$APP_DIR/python-x86_64/bin/python3" -m pip download \
-    --platform "macosx_10_15_x86_64" \
-    --python-version "$PY_SHORT" \
-    --implementation cp \
-    --abi "cp${PY_SHORT}" \
-    --only-binary :all: \
     --dest "$APP_DIR/wheels/x86_64/" \
     -r "$APP_DIR/requirements_full.txt" \
     --quiet
-
-"$APP_DIR/python-x86_64/bin/python3" -m pip download \
-    --platform "macosx_10_15_x86_64" \
-    --python-version "$PY_SHORT" \
-    --implementation cp \
-    --abi "cp${PY_SHORT}" \
-    --dest "$APP_DIR/wheels/x86_64/" \
-    -r "$APP_DIR/requirements_full.txt" \
-    --quiet 2>/dev/null || true
 
 # -----------------------------------------------------------------------------
 # Copy run.sh to USB root for easy access
