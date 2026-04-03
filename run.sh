@@ -58,6 +58,7 @@ LIB_DIR="$USB_DIR/lib-$ARCH_DIR"
 # -----------------------------------------------------------------------------
 FAKE_HOME="$USB_DIR/runtime/home"
 mkdir -p "$FAKE_HOME"
+export REAL_HOME="$HOME"   # save the target Mac's real home before overriding
 export HOME="$FAKE_HOME"
 
 # Redirect Python bytecode cache to USB

@@ -28,7 +28,9 @@ st.set_page_config(
     initial_sidebar_state='expanded',
 )
 
-DEFAULT_PROFILE = str(Path.home() / 'Library/Application Support/Google/Chrome/Default')
+import os
+_home = Path(os.environ.get('REAL_HOME', str(Path.home())))
+DEFAULT_PROFILE = str(_home / 'Library/Application Support/Google/Chrome/Default')
 
 # ---------------------------------------------------------------------------
 # Helpers
