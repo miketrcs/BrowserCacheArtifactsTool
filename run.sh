@@ -131,6 +131,20 @@ info "Starting on http://localhost:${PORT}"
 warn "Nothing is written to the target Mac — all data stays in the install directory."
 printf "\n  Press Ctrl+C to stop.\n\n"
 
+# -----------------------------------------------------------------------------
+# Optional: warn if Safari data is likely inaccessible (no Full Disk Access)
+# -----------------------------------------------------------------------------
+SAFARI_HISTORY="$REAL_HOME/Library/Safari/History.db"
+if [ -f "$SAFARI_HISTORY" ]; then
+    if ! cat "$SAFARI_HISTORY" > /dev/null 2>&1; then
+        printf "\n"
+        warn "Safari data is NOT accessible — macOS Full Disk Access is required."
+        warn "To fix: System Settings → Privacy & Security → Full Disk Access → add Terminal"
+        warn "Then quit Terminal and relaunch this script."
+        printf "\n"
+    fi
+fi
+
 if [ "$OPEN_BROWSER" = true ]; then
     (sleep 3 && open "http://localhost:${PORT}") &
 fi

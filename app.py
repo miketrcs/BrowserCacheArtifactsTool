@@ -36,9 +36,31 @@ st.set_page_config(
 )
 
 import os
+import subprocess
 _home = Path(os.environ.get('REAL_HOME', str(Path.home())))
 DEFAULT_CHROME_PROFILE = str(_home / 'Library/Application Support/Google/Chrome/Default')
 DEFAULT_SAFARI_ROOT    = str(_home / 'Library/Safari')
+
+
+def _check_safari_permissions(safari_root: str) -> bool:
+    """Return True if we can read Safari's protected files."""
+    test_path = Path(safari_root) / 'History.db'
+    try:
+        with open(test_path, 'rb') as f:
+            f.read(1)
+        return True
+    except PermissionError:
+        return False
+    except FileNotFoundError:
+        return True  # File missing is fine, not a permissions problem
+
+
+def _open_full_disk_access_settings():
+    """Open System Settings directly to the Full Disk Access page."""
+    subprocess.run([
+        'open',
+        'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'
+    ], check=False)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -156,7 +178,7 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Session state
 # ---------------------------------------------------------------------------
-for key in ('history', 'downloads', 'cookies', 'bookmarks', 'images', 'version', 'loaded', 'browser'):
+for key in ('history', 'downloads', 'cookies', 'bookmarks', 'images', 'version', 'loaded', 'browser', 'perm_error'):
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -204,6 +226,13 @@ if load_btn:
 
         else:  # Safari
             st.session_state.version = ['Safari']
+
+            # Quick permission check before parsing
+            _safari_perm_ok = _check_safari_permissions(profile)
+            if not _safari_perm_ok:
+                st.session_state.perm_error = True
+            else:
+                st.session_state.perm_error = False
 
             with st.spinner('Parsing Safari history…'):
                 st.session_state.history = parse_safari_history(profile)
@@ -253,6 +282,24 @@ if not st.session_state.loaded:
     )
     st.info('Tip: close the browser before loading to ensure all databases are accessible.')
     st.stop()
+
+# Permission error banner (Safari only)
+if st.session_state.perm_error:
+    st.error(
+        '**macOS Full Disk Access required for Safari data.**\n\n'
+        'Safari\'s files are protected by macOS privacy controls. '
+        'Grant **Full Disk Access** to Terminal (or your shell), then restart the app.'
+    )
+    if st.button('Open Privacy & Security Settings →'):
+        _open_full_disk_access_settings()
+    st.markdown(
+        '**Steps:**\n'
+        '1. Click the button above (or go to **System Settings → Privacy & Security → Full Disk Access**)\n'
+        '2. Click **+** and add **Terminal** (or iTerm2 / whichever app you launched this from)\n'
+        '3. Quit Terminal completely and relaunch\n'
+        '4. Run `~/BrowserCacheArtifacts/run.sh` again'
+    )
+    st.divider()
 
 # Summary metrics
 active_browser = st.session_state.browser or 'Browser'
