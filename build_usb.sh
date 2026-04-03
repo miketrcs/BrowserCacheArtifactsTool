@@ -28,9 +28,9 @@ PY_X86_URL="${PY_BASE}/cpython-${PY_VER}%2B${PY_TAG}-x86_64-apple-darwin-install
 # -----------------------------------------------------------------------------
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-info()    { echo -e "${GREEN}[+]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
-fatal()   { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
+info()    { printf "${GREEN}[+]${NC} %s\n" "$*"; }
+warn()    { printf "${YELLOW}[!]${NC} %s\n" "$*"; }
+fatal()   { printf "${RED}[✗]${NC} %s\n" "$*" >&2; exit 1; }
 
 # -----------------------------------------------------------------------------
 # Resolve destination
@@ -38,13 +38,24 @@ fatal()   { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 DEST="${1:-}"
 
 if [ -z "$DEST" ]; then
-    echo ""
-    echo "Where would you like to install BrowserCacheArtifactsTool?"
-    echo "  1) USB key  (e.g. /Volumes/Samsung)"
-    echo "  2) Local folder  (e.g. ~/BrowserCacheArtifacts)"
-    echo ""
-    read -rp "Enter destination path: " DEST
+    printf "\nWhere would you like to install BrowserCacheArtifactsTool?\n"
+    printf "  1) USB key    (e.g. /Volumes/Samsung)\n"
+    printf "  2) Local home (~/BrowserCacheArtifacts)\n"
+    printf "  Or enter any custom path\n\n"
+    read -rp "Choice or path [1/2/path]: " DEST
     [ -z "$DEST" ] && fatal "No destination provided."
+
+    # Map menu choices to real paths
+    case "$DEST" in
+        1)
+            read -rp "Enter USB volume path (e.g. /Volumes/Samsung): " DEST
+            [ -z "$DEST" ] && fatal "No path provided."
+            ;;
+        2)
+            DEST="$HOME/BrowserCacheArtifacts"
+            printf "Installing to: %s\n" "$DEST"
+            ;;
+    esac
 fi
 
 # Expand ~ if present
