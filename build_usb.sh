@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # =============================================================================
-# build_usb.sh — BrowserCacheArtifactsTool USB preparation script
+# build_usb.sh — BrowserCacheArtifactsTool installer
 #
-# Run this ONCE on your own Mac to build the USB key.
-# Requires internet access. The resulting USB requires none.
+# Run this ONCE on your own Mac to install to a USB key or local folder.
+# Requires internet access. The resulting install requires none.
 #
 # Usage:
-#   chmod +x build_usb.sh
-#   ./build_usb.sh /Volumes/YourUSBName
+#   ./build_usb.sh /Volumes/YourUSBName     # install to USB key
+#   ./build_usb.sh ~/BrowserCacheArtifacts  # install to local folder
+#   ./build_usb.sh                           # prompts for destination
 #
 # USB filesystem requirement: APFS or HFS+ (NOT exFAT / FAT32)
 # To reformat a USB as APFS in Disk Utility:
@@ -31,27 +32,52 @@ info()    { echo -e "${GREEN}[+]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
 fatal()   { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 
-USB="${1:-}"
-[ -z "$USB" ] && fatal "Usage: $0 /Volumes/YourUSBName"
-[ -d "$USB" ] || fatal "Mount point not found: $USB"
+# -----------------------------------------------------------------------------
+# Resolve destination
+# -----------------------------------------------------------------------------
+DEST="${1:-}"
 
-# Check filesystem type (must support symlinks)
-FS=$(diskutil info "$USB" 2>/dev/null | awk '/File System Personality/ {print $NF}')
-info "USB filesystem: $FS"
-if [[ "$FS" == *"FAT"* ]] || [[ "$FS" == *"ExFAT"* ]]; then
-    fatal "USB is formatted as $FS — symlinks not supported.\nReformat as APFS or HFS+ (Mac OS Extended) in Disk Utility."
+if [ -z "$DEST" ]; then
+    echo ""
+    echo "Where would you like to install BrowserCacheArtifactsTool?"
+    echo "  1) USB key  (e.g. /Volumes/Samsung)"
+    echo "  2) Local folder  (e.g. ~/BrowserCacheArtifacts)"
+    echo ""
+    read -rp "Enter destination path: " DEST
+    [ -z "$DEST" ] && fatal "No destination provided."
 fi
 
-# Check available space (need ~800MB)
-AVAIL=$(df -m "$USB" | awk 'NR==2 {print $4}')
-[ "$AVAIL" -lt 800 ] && fatal "Not enough space on USB (need ~800MB, have ${AVAIL}MB)"
+# Expand ~ if present
+DEST="${DEST/#\~/$HOME}"
 
-info "Preparing USB at: $USB"
+# -----------------------------------------------------------------------------
+# Filesystem check (only applies to mounted volumes)
+# -----------------------------------------------------------------------------
+IS_VOLUME=false
+if [[ "$DEST" == /Volumes/* ]]; then
+    IS_VOLUME=true
+    [ -d "$DEST" ] || fatal "Mount point not found: $DEST"
+    FS=$(diskutil info "$DEST" 2>/dev/null | awk '/File System Personality/ {print $NF}')
+    info "USB filesystem: $FS"
+    if [[ "$FS" == *"FAT"* ]] || [[ "$FS" == *"ExFAT"* ]]; then
+        fatal "USB is formatted as $FS — symlinks not supported.\nReformat as APFS or HFS+ (Mac OS Extended) in Disk Utility."
+    fi
+else
+    # Local install — create the destination if needed
+    mkdir -p "$DEST"
+    info "Local install destination: $DEST"
+fi
+
+# Check available space (~800 MB needed)
+AVAIL=$(df -m "$DEST" | awk 'NR==2 {print $4}')
+[ "$AVAIL" -lt 800 ] && fatal "Not enough space (need ~800MB, have ${AVAIL}MB)"
+
+info "Installing to: $DEST"
 
 # -----------------------------------------------------------------------------
 # Directory structure
 # -----------------------------------------------------------------------------
-APP_DIR="$USB/BrowserCacheArtifacts"
+APP_DIR="$DEST/BrowserCacheArtifacts"
 mkdir -p \
     "$APP_DIR/python-arm64" \
     "$APP_DIR/python-x86_64" \
@@ -64,10 +90,12 @@ mkdir -p \
 # -----------------------------------------------------------------------------
 info "Copying app files..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cp "$SCRIPT_DIR/app.py"               "$APP_DIR/"
-cp "$SCRIPT_DIR/main.py"              "$APP_DIR/"
-cp "$SCRIPT_DIR/requirements.txt"     "$APP_DIR/"
+cp "$SCRIPT_DIR/app.py"                "$APP_DIR/"
+cp "$SCRIPT_DIR/main.py"               "$APP_DIR/"
+cp "$SCRIPT_DIR/requirements.txt"      "$APP_DIR/"
 cp "$SCRIPT_DIR/requirements_full.txt" "$APP_DIR/"
+cp "$SCRIPT_DIR/run.sh"                "$APP_DIR/"
+chmod +x "$APP_DIR/run.sh"
 cp "$SCRIPT_DIR/chrome_artifacts/"*.py "$APP_DIR/chrome_artifacts/"
 touch "$APP_DIR/chrome_artifacts/__init__.py"
 
@@ -97,9 +125,7 @@ info "Extracting x86_64 Python..."
 tar -xzf "$X86_TGZ" -C "$APP_DIR/python-x86_64" --strip-components=1
 
 # -----------------------------------------------------------------------------
-# Download wheels for arm64
-# Each standalone Python downloads its own native wheels — no cross-platform
-# resolver tricks that cause conflicts.
+# Download wheels
 # -----------------------------------------------------------------------------
 info "Downloading wheels for arm64..."
 "$APP_DIR/python-arm64/bin/python3" -m pip download \
@@ -107,11 +133,6 @@ info "Downloading wheels for arm64..."
     -r "$APP_DIR/requirements_full.txt" \
     --quiet
 
-# -----------------------------------------------------------------------------
-# Download wheels for x86_64
-# On Apple Silicon the x86_64 binary runs via Rosetta automatically,
-# so pip will correctly resolve x86_64-native wheels.
-# -----------------------------------------------------------------------------
 info "Downloading wheels for x86_64..."
 "$APP_DIR/python-x86_64/bin/python3" -m pip download \
     --dest "$APP_DIR/wheels/x86_64/" \
@@ -119,26 +140,22 @@ info "Downloading wheels for x86_64..."
     --quiet
 
 # -----------------------------------------------------------------------------
-# Copy run.sh to USB root for easy access
-# -----------------------------------------------------------------------------
-cp "$SCRIPT_DIR/run.sh" "$APP_DIR/run.sh"
-chmod +x "$APP_DIR/run.sh"
-
-# -----------------------------------------------------------------------------
 # Done
 # -----------------------------------------------------------------------------
 ARM64_COUNT=$(ls "$APP_DIR/wheels/arm64/" | wc -l | tr -d ' ')
 X86_COUNT=$(ls "$APP_DIR/wheels/x86_64/" | wc -l | tr -d ' ')
-USB_USED=$(du -sh "$APP_DIR" | awk '{print $1}')
+USED=$(du -sh "$APP_DIR" | awk '{print $1}')
 
 echo ""
-info "USB build complete!"
+info "Install complete!"
 echo "  Path:          $APP_DIR"
 echo "  Wheels arm64:  $ARM64_COUNT packages"
 echo "  Wheels x86_64: $X86_COUNT packages"
-echo "  Total size:    $USB_USED"
+echo "  Total size:    $USED"
 echo ""
-echo "  To launch on any Mac:"
+echo "  To launch:"
 echo "    $APP_DIR/run.sh"
 echo ""
-warn "Tip: eject the USB cleanly before moving to the target machine."
+if [ "$IS_VOLUME" = true ]; then
+    warn "Tip: eject the USB cleanly before moving to the target machine."
+fi
