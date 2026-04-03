@@ -359,32 +359,36 @@ with tab_cook:
 with tab_bm:
     items = st.session_state.bookmarks
     df = bookmarks_to_df(items)
-    url_df = df[df['Type'] == 'bookmark']
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search = st.text_input('Search name or URL', key='bm_search', placeholder='Filter…')
-    with col2:
-        folders = ['All'] + sorted(url_df['Folder'].unique().tolist())
-        folder_filter = st.selectbox('Folder', folders, key='bm_folder')
+    if df.empty or 'Type' not in df.columns:
+        st.info('No bookmarks found.')
+    else:
+        url_df = df[df['Type'] == 'bookmark']
 
-    filtered = url_df.copy()
-    if search:
-        mask = (filtered['Name'].str.contains(search, case=False, na=False) |
-                filtered['URL'].str.contains(search, case=False, na=False))
-        filtered = filtered[mask]
-    if folder_filter != 'All':
-        filtered = filtered[filtered['Folder'] == folder_filter]
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            search = st.text_input('Search name or URL', key='bm_search', placeholder='Filter…')
+        with col2:
+            folders = ['All'] + sorted(url_df['Folder'].unique().tolist())
+            folder_filter = st.selectbox('Folder', folders, key='bm_folder')
 
-    st.caption(f'{len(filtered):,} bookmarks')
-    st.dataframe(filtered.drop(columns=['Type']), use_container_width=True, height=500,
-                 column_config={
-                     'URL': st.column_config.LinkColumn('URL'),
-                 })
+        filtered = url_df.copy()
+        if search:
+            mask = (filtered['Name'].str.contains(search, case=False, na=False) |
+                    filtered['URL'].str.contains(search, case=False, na=False))
+            filtered = filtered[mask]
+        if folder_filter != 'All':
+            filtered = filtered[filtered['Folder'] == folder_filter]
+
+        st.caption(f'{len(filtered):,} bookmarks')
+        st.dataframe(filtered.drop(columns=['Type']), use_container_width=True, height=500,
+                     column_config={
+                         'URL': st.column_config.LinkColumn('URL'),
+                     })
 
 # ---- Cached Images ---------------------------------------------------------
 with tab_img:
-    images = st.session_state.images
+    images = st.session_state.images or []
 
     col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
