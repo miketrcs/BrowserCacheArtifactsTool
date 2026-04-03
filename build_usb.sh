@@ -6,8 +6,8 @@
 # Requires internet access. The resulting install requires none.
 #
 # Usage:
-#   ./build_usb.sh /Volumes/YourUSBName     # install to USB key
-#   ./build_usb.sh ~/BrowserCacheArtifacts  # install to local folder
+#   ./build_usb.sh /Volumes/YourUSBName     # install to USB key (both archs)
+#   ./build_usb.sh ~/BrowserCacheArtifacts  # install to local folder (current arch only)
 #   ./build_usb.sh                           # prompts for destination
 #
 # USB filesystem requirement: APFS or HFS+ (NOT exFAT / FAT32)
@@ -33,19 +33,28 @@ warn()    { printf "${YELLOW}[!]${NC} %s\n" "$*"; }
 fatal()   { printf "${RED}[✗]${NC} %s\n" "$*" >&2; exit 1; }
 
 # -----------------------------------------------------------------------------
+# Detect current architecture
+# -----------------------------------------------------------------------------
+ARCH=$(uname -m)
+case "$ARCH" in
+    arm64)  NATIVE_ARCH="arm64"  ;;
+    x86_64) NATIVE_ARCH="x86_64" ;;
+    *)      fatal "Unsupported architecture: $ARCH" ;;
+esac
+
+# -----------------------------------------------------------------------------
 # Resolve destination
 # -----------------------------------------------------------------------------
 DEST="${1:-}"
 
 if [ -z "$DEST" ]; then
     printf "\nWhere would you like to install BrowserCacheArtifactsTool?\n"
-    printf "  1) USB key    (e.g. /Volumes/Samsung)\n"
-    printf "  2) Local home (~/BrowserCacheArtifacts)\n"
+    printf "  1) USB key    (e.g. /Volumes/Samsung)  — bundles both arm64 + x86_64\n"
+    printf "  2) Local home (~/BrowserCacheArtifacts) — current arch only, faster\n"
     printf "  Or enter any custom path\n\n"
     read -rp "Choice or path [1/2/path]: " DEST
     [ -z "$DEST" ] && fatal "No destination provided."
 
-    # Map menu choices to real paths
     case "$DEST" in
         1)
             read -rp "Enter USB volume path (e.g. /Volumes/Samsung): " DEST
@@ -62,7 +71,7 @@ fi
 DEST="${DEST/#\~/$HOME}"
 
 # -----------------------------------------------------------------------------
-# Filesystem check (only applies to mounted volumes)
+# Filesystem check + determine if we need both architectures
 # -----------------------------------------------------------------------------
 IS_VOLUME=false
 if [[ "$DEST" == /Volumes/* ]]; then
@@ -71,17 +80,19 @@ if [[ "$DEST" == /Volumes/* ]]; then
     FS=$(diskutil info "$DEST" 2>/dev/null | awk '/File System Personality/ {print $NF}')
     info "USB filesystem: $FS"
     if [[ "$FS" == *"FAT"* ]] || [[ "$FS" == *"ExFAT"* ]]; then
-        fatal "USB is formatted as $FS — symlinks not supported.\nReformat as APFS or HFS+ (Mac OS Extended) in Disk Utility."
+        fatal "USB is formatted as $FS — symlinks not supported. Reformat as APFS or HFS+ in Disk Utility."
     fi
+    DUAL_ARCH=true
 else
-    # Local install — create the destination if needed
     mkdir -p "$DEST"
-    info "Local install destination: $DEST"
+    DUAL_ARCH=false
+    info "Local install — downloading $NATIVE_ARCH only"
 fi
 
-# Check available space (~800 MB needed)
+# Check available space
+NEEDED=$([ "$DUAL_ARCH" = true ] && echo 800 || echo 450)
 AVAIL=$(df -m "$DEST" | awk 'NR==2 {print $4}')
-[ "$AVAIL" -lt 800 ] && fatal "Not enough space (need ~800MB, have ${AVAIL}MB)"
+[ "$AVAIL" -lt "$NEEDED" ] && fatal "Not enough space (need ~${NEEDED}MB, have ${AVAIL}MB)"
 
 info "Installing to: $DEST"
 
@@ -89,12 +100,20 @@ info "Installing to: $DEST"
 # Directory structure
 # -----------------------------------------------------------------------------
 APP_DIR="$DEST/BrowserCacheArtifacts"
-mkdir -p \
-    "$APP_DIR/python-arm64" \
-    "$APP_DIR/python-x86_64" \
-    "$APP_DIR/wheels/arm64" \
-    "$APP_DIR/wheels/x86_64" \
-    "$APP_DIR/chrome_artifacts"
+
+if [ "$DUAL_ARCH" = true ]; then
+    mkdir -p \
+        "$APP_DIR/python-arm64" \
+        "$APP_DIR/python-x86_64" \
+        "$APP_DIR/wheels/arm64" \
+        "$APP_DIR/wheels/x86_64" \
+        "$APP_DIR/chrome_artifacts"
+else
+    mkdir -p \
+        "$APP_DIR/python-$NATIVE_ARCH" \
+        "$APP_DIR/wheels/$NATIVE_ARCH" \
+        "$APP_DIR/chrome_artifacts"
+fi
 
 # -----------------------------------------------------------------------------
 # Copy app files
@@ -111,62 +130,56 @@ cp "$SCRIPT_DIR/chrome_artifacts/"*.py "$APP_DIR/chrome_artifacts/"
 touch "$APP_DIR/chrome_artifacts/__init__.py"
 
 # -----------------------------------------------------------------------------
-# Download Python (arm64)
+# Helper: download + extract one Python build
 # -----------------------------------------------------------------------------
-info "Downloading Python ${PY_VER} for arm64..."
 TMPDIR_PBS=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_PBS"' EXIT
 
-ARM64_TGZ="$TMPDIR_PBS/python-arm64.tar.gz"
-if ! curl -fL --progress-bar -o "$ARM64_TGZ" "$PY_ARM64_URL"; then
-    fatal "Failed to download arm64 Python"
+download_python() {
+    local arch="$1" url="$2"
+    local tgz="$TMPDIR_PBS/python-${arch}.tar.gz"
+    info "Downloading Python ${PY_VER} for ${arch}..."
+    curl -fL --progress-bar -o "$tgz" "$url" || fatal "Failed to download ${arch} Python"
+    info "Extracting ${arch} Python..."
+    tar -xzf "$tgz" -C "$APP_DIR/python-${arch}" --strip-components=1
+}
+
+download_wheels() {
+    local arch="$1"
+    info "Downloading wheels for ${arch}..."
+    "$APP_DIR/python-${arch}/bin/python3" -m pip download \
+        --dest "$APP_DIR/wheels/${arch}/" \
+        -r "$APP_DIR/requirements_full.txt" \
+        --quiet
+}
+
+# -----------------------------------------------------------------------------
+# Download Python + wheels for required architectures
+# -----------------------------------------------------------------------------
+if [ "$DUAL_ARCH" = true ]; then
+    download_python "arm64"  "$PY_ARM64_URL"
+    download_python "x86_64" "$PY_X86_URL"
+    download_wheels "arm64"
+    download_wheels "x86_64"
+else
+    case "$NATIVE_ARCH" in
+        arm64)  download_python "arm64"  "$PY_ARM64_URL" ;;
+        x86_64) download_python "x86_64" "$PY_X86_URL"  ;;
+    esac
+    download_wheels "$NATIVE_ARCH"
 fi
-info "Extracting arm64 Python..."
-tar -xzf "$ARM64_TGZ" -C "$APP_DIR/python-arm64" --strip-components=1
-
-# -----------------------------------------------------------------------------
-# Download Python (x86_64)
-# -----------------------------------------------------------------------------
-info "Downloading Python ${PY_VER} for x86_64..."
-X86_TGZ="$TMPDIR_PBS/python-x86_64.tar.gz"
-if ! curl -fL --progress-bar -o "$X86_TGZ" "$PY_X86_URL"; then
-    fatal "Failed to download x86_64 Python"
-fi
-info "Extracting x86_64 Python..."
-tar -xzf "$X86_TGZ" -C "$APP_DIR/python-x86_64" --strip-components=1
-
-# -----------------------------------------------------------------------------
-# Download wheels
-# -----------------------------------------------------------------------------
-info "Downloading wheels for arm64..."
-"$APP_DIR/python-arm64/bin/python3" -m pip download \
-    --dest "$APP_DIR/wheels/arm64/" \
-    -r "$APP_DIR/requirements_full.txt" \
-    --quiet
-
-info "Downloading wheels for x86_64..."
-"$APP_DIR/python-x86_64/bin/python3" -m pip download \
-    --dest "$APP_DIR/wheels/x86_64/" \
-    -r "$APP_DIR/requirements_full.txt" \
-    --quiet
 
 # -----------------------------------------------------------------------------
 # Done
 # -----------------------------------------------------------------------------
-ARM64_COUNT=$(ls "$APP_DIR/wheels/arm64/" | wc -l | tr -d ' ')
-X86_COUNT=$(ls "$APP_DIR/wheels/x86_64/" | wc -l | tr -d ' ')
 USED=$(du -sh "$APP_DIR" | awk '{print $1}')
 
-echo ""
+printf "\n"
 info "Install complete!"
-echo "  Path:          $APP_DIR"
-echo "  Wheels arm64:  $ARM64_COUNT packages"
-echo "  Wheels x86_64: $X86_COUNT packages"
-echo "  Total size:    $USED"
-echo ""
-echo "  To launch:"
-echo "    $APP_DIR/run.sh"
-echo ""
+printf "  Path:       %s\n" "$APP_DIR"
+printf "  Total size: %s\n" "$USED"
+printf "\n  To launch:\n    %s/run.sh\n\n" "$APP_DIR"
+
 if [ "$IS_VOLUME" = true ]; then
     warn "Tip: eject the USB cleanly before moving to the target machine."
 fi
