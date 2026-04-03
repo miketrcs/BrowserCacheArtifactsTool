@@ -430,7 +430,7 @@ with tab_img:
             for col, img in zip(cols, row_imgs):
                 with col:
                     try:
-                        st.image(img.data, use_container_width=True)
+                        st.image(img.data, width='stretch')
                     except Exception:
                         st.warning('Cannot render')
                     label = img.url.split('?')[0].split('/')[-1][:30] or getattr(img, 'filename', img.url[:20])
