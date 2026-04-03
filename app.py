@@ -1,5 +1,6 @@
 """
-chrome-artifacts — Streamlit GUI
+BrowserCacheArtifactsTool — Streamlit GUI
+Supports Chrome and Safari on macOS.
 """
 import datetime
 import sys
@@ -17,12 +18,18 @@ from chrome_artifacts.parsers import (
 )
 from chrome_artifacts.output import export_sqlite
 from chrome_artifacts.cache import scan_cache, default_cache_path
+from chrome_artifacts.safari_parsers import (
+    parse_safari_history, parse_safari_downloads,
+    parse_safari_cookies, parse_safari_bookmarks,
+    default_paths as safari_default_paths,
+)
+from chrome_artifacts.safari_cache import scan_safari_cache
 
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title='Chrome Artifacts',
+    page_title='Browser Artifacts',
     page_icon='🔍',
     layout='wide',
     initial_sidebar_state='expanded',
@@ -30,7 +37,8 @@ st.set_page_config(
 
 import os
 _home = Path(os.environ.get('REAL_HOME', str(Path.home())))
-DEFAULT_PROFILE = str(_home / 'Library/Application Support/Google/Chrome/Default')
+DEFAULT_CHROME_PROFILE = str(_home / 'Library/Application Support/Google/Chrome/Default')
+DEFAULT_SAFARI_ROOT    = str(_home / 'Library/Safari')
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -98,44 +106,57 @@ def bookmarks_to_df(items) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Sidebar — profile config
+# Sidebar — browser + profile config
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.title('🔍 Chrome Artifacts')
-    st.caption('macOS Chrome artifact browser')
+    st.title('🔍 Browser Artifacts')
+    st.caption('macOS browser artifact browser')
     st.divider()
 
-    profile_path = st.text_input(
-        'Profile directory',
-        value=DEFAULT_PROFILE,
-        help='Path to the Chrome profile folder (usually "Default")',
+    browser = st.radio(
+        'Browser',
+        ['Chrome', 'Safari'],
+        horizontal=True,
     )
 
-    decrypt = st.toggle(
-        'Decrypt cookies',
-        value=False,
-        help='Retrieve encryption key from macOS Keychain to decrypt cookie values',
-    )
-
-    no_copy = st.toggle(
-        'No file copy',
-        value=False,
-        help='Read DB files directly — faster, but may fail if Chrome is open',
-    )
+    if browser == 'Chrome':
+        profile_path = st.text_input(
+            'Profile directory',
+            value=DEFAULT_CHROME_PROFILE,
+            help='Path to the Chrome profile folder (usually "Default")',
+        )
+        decrypt = st.toggle(
+            'Decrypt cookies',
+            value=False,
+            help='Retrieve encryption key from macOS Keychain to decrypt cookie values',
+        )
+        no_copy = st.toggle(
+            'No file copy',
+            value=False,
+            help='Read DB files directly — faster, but may fail if Chrome is open',
+        )
+    else:
+        profile_path = st.text_input(
+            'Safari data directory',
+            value=DEFAULT_SAFARI_ROOT,
+            help='Path to Safari data folder (usually ~/Library/Safari)',
+        )
+        decrypt = False
+        no_copy = False
 
     st.divider()
     load_btn = st.button('Load Profile', type='primary', use_container_width=True)
 
     st.divider()
     st.caption('Export')
-    export_name = st.text_input('Filename', value='chrome_artifacts.db')
+    export_name = st.text_input('Filename', value='browser_artifacts.db')
     export_btn = st.button('Export to SQLite', use_container_width=True)
 
 
 # ---------------------------------------------------------------------------
 # Session state
 # ---------------------------------------------------------------------------
-for key in ('history', 'downloads', 'cookies', 'bookmarks', 'images', 'version', 'loaded'):
+for key in ('history', 'downloads', 'cookies', 'bookmarks', 'images', 'version', 'loaded', 'browser'):
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -152,31 +173,48 @@ if load_btn:
     if not Path(profile).is_dir():
         st.error(f'Directory not found: `{profile}`')
     else:
-        with st.spinner('Detecting Chrome version…'):
-            version = detect_version(profile, no_copy=no_copy)
-        st.session_state.version = version
+        st.session_state.browser = browser
 
-        decryptor = None
-        if decrypt:
-            try:
-                from chrome_artifacts.decrypt import MacDecryptor
-                decryptor = MacDecryptor()
-            except Exception as e:
-                st.warning(f'Could not initialise decryptor: {e}')
+        if browser == 'Chrome':
+            with st.spinner('Detecting Chrome version…'):
+                version = detect_version(profile, no_copy=no_copy)
+            st.session_state.version = version
 
-        with st.spinner('Parsing history…'):
-            st.session_state.history = parse_history(profile, version, no_copy=no_copy)
-        with st.spinner('Parsing downloads…'):
-            st.session_state.downloads = parse_downloads(profile, version, no_copy=no_copy)
-        with st.spinner('Parsing cookies…'):
-            st.session_state.cookies = parse_cookies(profile, version,
-                                                      decryptor=decryptor, no_copy=no_copy)
-        with st.spinner('Parsing bookmarks…'):
-            st.session_state.bookmarks = parse_bookmarks(profile, version)
+            decryptor = None
+            if decrypt:
+                try:
+                    from chrome_artifacts.decrypt import MacDecryptor
+                    decryptor = MacDecryptor()
+                except Exception as e:
+                    st.warning(f'Could not initialise decryptor: {e}')
 
-        with st.spinner('Scanning cache for images… (this may take a moment)'):
-            cache_dir = default_cache_path(profile)
-            st.session_state.images = scan_cache(cache_dir, max_results=500)
+            with st.spinner('Parsing history…'):
+                st.session_state.history = parse_history(profile, version, no_copy=no_copy)
+            with st.spinner('Parsing downloads…'):
+                st.session_state.downloads = parse_downloads(profile, version, no_copy=no_copy)
+            with st.spinner('Parsing cookies…'):
+                st.session_state.cookies = parse_cookies(profile, version,
+                                                          decryptor=decryptor, no_copy=no_copy)
+            with st.spinner('Parsing bookmarks…'):
+                st.session_state.bookmarks = parse_bookmarks(profile, version)
+
+            with st.spinner('Scanning cache for images… (this may take a moment)'):
+                cache_dir = default_cache_path(profile)
+                st.session_state.images = scan_cache(cache_dir, max_results=500)
+
+        else:  # Safari
+            st.session_state.version = ['Safari']
+
+            with st.spinner('Parsing Safari history…'):
+                st.session_state.history = parse_safari_history(profile)
+            with st.spinner('Parsing Safari downloads…'):
+                st.session_state.downloads = parse_safari_downloads(profile)
+            with st.spinner('Parsing Safari cookies…'):
+                st.session_state.cookies = parse_safari_cookies(profile)
+            with st.spinner('Parsing Safari bookmarks…'):
+                st.session_state.bookmarks = parse_safari_bookmarks(profile)
+            with st.spinner('Scanning Safari cache for images…'):
+                st.session_state.images = scan_safari_cache(profile, max_results=500)
 
         st.session_state.loaded = True
         st.success('Profile loaded.')
@@ -204,24 +242,33 @@ if export_btn:
 # Main area
 # ---------------------------------------------------------------------------
 if not st.session_state.loaded:
-    st.markdown('## Chrome Artifact Browser')
+    st.markdown('## Browser Artifact Browser')
     st.markdown(
-        'Enter your Chrome profile path in the sidebar and click **Load Profile**.\n\n'
-        '**Default location on macOS:**\n'
-        '```\n~/Library/Application Support/Google/Chrome/Default\n```'
+        'Select a browser in the sidebar, enter the profile path, and click **Load Profile**.\n\n'
+        '**Default locations on macOS:**\n'
+        '```\n'
+        'Chrome:  ~/Library/Application Support/Google/Chrome/Default\n'
+        'Safari:  ~/Library/Safari\n'
+        '```'
     )
-    st.info('Tip: close Chrome before loading to ensure all databases are accessible.')
+    st.info('Tip: close the browser before loading to ensure all databases are accessible.')
     st.stop()
 
 # Summary metrics
+active_browser = st.session_state.browser or 'Browser'
 v = st.session_state.version
-st.caption(f'Chrome version range: {v[0]}–{v[-1]}  ·  Profile: `{profile_path}`')
+if isinstance(v, list) and len(v) > 1:
+    version_str = f'Chrome version range: {v[0]}–{v[-1]}'
+else:
+    version_str = active_browser
+
+st.caption(f'{version_str}  ·  Profile: `{profile_path}`')
 
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric('History',   f'{len(st.session_state.history):,}')
-c2.metric('Downloads', f'{len(st.session_state.downloads):,}')
-c3.metric('Cookies',   f'{len(st.session_state.cookies):,}')
-c4.metric('Bookmarks', f'{len(st.session_state.bookmarks):,}')
+c1.metric('History',       f'{len(st.session_state.history):,}')
+c2.metric('Downloads',     f'{len(st.session_state.downloads):,}')
+c3.metric('Cookies',       f'{len(st.session_state.cookies):,}')
+c4.metric('Bookmarks',     f'{len(st.session_state.bookmarks):,}')
 c5.metric('Cached Images', f'{len(st.session_state.images):,}')
 
 st.divider()
@@ -364,7 +411,6 @@ with tab_img:
     if not filtered_imgs:
         st.info('No cached images match the current filters.')
     else:
-        # Render image grid
         for row_start in range(0, len(filtered_imgs), cols_per_row):
             row_imgs = filtered_imgs[row_start:row_start + cols_per_row]
             cols = st.columns(cols_per_row)
@@ -374,7 +420,7 @@ with tab_img:
                         st.image(img.data, use_container_width=True)
                     except Exception:
                         st.warning('Cannot render')
-                    label = img.url.split('?')[0].split('/')[-1][:30] or img.filename
+                    label = img.url.split('?')[0].split('/')[-1][:30] or getattr(img, 'filename', img.url[:20])
                     st.caption(
                         f'[{label}]({img.url})  \n'
                         f'{img.width}×{img.height} · {img.size_bytes:,}B · {img.mime_type.split("/")[-1]}'
