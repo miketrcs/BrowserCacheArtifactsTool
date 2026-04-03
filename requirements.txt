@@ -1,0 +1,4 @@
+pycryptodomex>=3.9.7
+keyring>=21.2.1
+rich>=13.0
+pytz>=2021.3
