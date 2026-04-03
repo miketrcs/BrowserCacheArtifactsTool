@@ -167,12 +167,12 @@ with st.sidebar:
         no_copy = False
 
     st.divider()
-    load_btn = st.button('Load Profile', type='primary', use_container_width=True)
+    load_btn = st.button('Load Profile', type='primary', width="stretch")
 
     st.divider()
     st.caption('Export')
     export_name = st.text_input('Filename', value='browser_artifacts.db')
-    export_btn = st.button('Export to SQLite', use_container_width=True)
+    export_btn = st.button('Export to SQLite', width="stretch")
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +347,7 @@ with tab_hist:
             df = df[df['Transition'] == trans_filter]
 
         st.caption(f'{len(df):,} records')
-        st.dataframe(df, use_container_width=True, height=500,
+        st.dataframe(df, width="stretch", height=500,
                      column_config={
                          'URL': st.column_config.LinkColumn('URL'),
                          'Visits': st.column_config.NumberColumn('Visits', format='%d'),
@@ -376,7 +376,7 @@ with tab_dl:
             df = df[df['State'] == state_filter]
 
         st.caption(f'{len(df):,} records')
-        st.dataframe(df, use_container_width=True, height=500,
+        st.dataframe(df, width="stretch", height=500,
                      column_config={
                          'URL': st.column_config.LinkColumn('URL'),
                          'Received': st.column_config.NumberColumn('Received', format='%d bytes'),
@@ -409,7 +409,7 @@ with tab_cook:
             df = df[df['Persistent']]
 
         st.caption(f'{len(df):,} records')
-        st.dataframe(df, use_container_width=True, height=500)
+        st.dataframe(df, width="stretch", height=500)
 
 # ---- Bookmarks -------------------------------------------------------------
 with tab_bm:
@@ -437,7 +437,7 @@ with tab_bm:
             filtered = filtered[filtered['Folder'] == folder_filter]
 
         st.caption(f'{len(filtered):,} bookmarks')
-        st.dataframe(filtered.drop(columns=['Type']), use_container_width=True, height=500,
+        st.dataframe(filtered.drop(columns=['Type']), width="stretch", height=500,
                      column_config={
                          'URL': st.column_config.LinkColumn('URL'),
                      })
