@@ -203,8 +203,9 @@ def scan_cache(cache_path: str,
 
 def default_cache_path(profile_path: str) -> str:
     """Return the default Chrome cache directory for a given profile path."""
-    # Chrome on macOS keeps cache in a separate Caches directory
-    home = Path.home()
+    import os
+    # Use REAL_HOME if set (USB mode), otherwise fall back to Path.home()
+    home = Path(os.environ.get('REAL_HOME', str(Path.home())))
     mac_cache = home / 'Library/Caches/Google/Chrome/Default/Cache/Cache_Data'
     if mac_cache.is_dir():
         return str(mac_cache)
