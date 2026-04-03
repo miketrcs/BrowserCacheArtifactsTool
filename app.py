@@ -265,11 +265,11 @@ else:
 st.caption(f'{version_str}  ·  Profile: `{profile_path}`')
 
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric('History',       f'{len(st.session_state.history):,}')
-c2.metric('Downloads',     f'{len(st.session_state.downloads):,}')
-c3.metric('Cookies',       f'{len(st.session_state.cookies):,}')
-c4.metric('Bookmarks',     f'{len(st.session_state.bookmarks):,}')
-c5.metric('Cached Images', f'{len(st.session_state.images):,}')
+c1.metric('History',       f'{len(st.session_state.history or []):,}')
+c2.metric('Downloads',     f'{len(st.session_state.downloads or []):,}')
+c3.metric('Cookies',       f'{len(st.session_state.cookies or []):,}')
+c4.metric('Bookmarks',     f'{len(st.session_state.bookmarks or []):,}')
+c5.metric('Cached Images', f'{len(st.session_state.images or []):,}')
 
 st.divider()
 
@@ -282,78 +282,87 @@ with tab_hist:
     items = st.session_state.history
     df = history_to_df(items)
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search = st.text_input('Search URL or title', key='hist_search', placeholder='Filter…')
-    with col2:
-        transitions = ['All'] + sorted(df['Transition'].unique().tolist())
-        trans_filter = st.selectbox('Transition', transitions, key='hist_trans')
+    if df.empty:
+        st.info('No history found.')
+    else:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            search = st.text_input('Search URL or title', key='hist_search', placeholder='Filter…')
+        with col2:
+            transitions = ['All'] + sorted(df['Transition'].unique().tolist())
+            trans_filter = st.selectbox('Transition', transitions, key='hist_trans')
 
-    if search:
-        mask = (df['URL'].str.contains(search, case=False, na=False) |
-                df['Title'].str.contains(search, case=False, na=False))
-        df = df[mask]
-    if trans_filter != 'All':
-        df = df[df['Transition'] == trans_filter]
+        if search:
+            mask = (df['URL'].str.contains(search, case=False, na=False) |
+                    df['Title'].str.contains(search, case=False, na=False))
+            df = df[mask]
+        if trans_filter != 'All':
+            df = df[df['Transition'] == trans_filter]
 
-    st.caption(f'{len(df):,} records')
-    st.dataframe(df, use_container_width=True, height=500,
-                 column_config={
-                     'URL': st.column_config.LinkColumn('URL'),
-                     'Visits': st.column_config.NumberColumn('Visits', format='%d'),
-                 })
+        st.caption(f'{len(df):,} records')
+        st.dataframe(df, use_container_width=True, height=500,
+                     column_config={
+                         'URL': st.column_config.LinkColumn('URL'),
+                         'Visits': st.column_config.NumberColumn('Visits', format='%d'),
+                     })
 
 # ---- Downloads -------------------------------------------------------------
 with tab_dl:
     items = st.session_state.downloads
     df = downloads_to_df(items)
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search = st.text_input('Search URL or path', key='dl_search', placeholder='Filter…')
-    with col2:
-        states = ['All'] + sorted(df['State'].unique().tolist())
-        state_filter = st.selectbox('State', states, key='dl_state')
+    if df.empty:
+        st.info('No downloads found.')
+    else:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            search = st.text_input('Search URL or path', key='dl_search', placeholder='Filter…')
+        with col2:
+            states = ['All'] + sorted(df['State'].unique().tolist())
+            state_filter = st.selectbox('State', states, key='dl_state')
 
-    if search:
-        mask = (df['URL'].str.contains(search, case=False, na=False) |
-                df['Saved To'].str.contains(search, case=False, na=False))
-        df = df[mask]
-    if state_filter != 'All':
-        df = df[df['State'] == state_filter]
+        if search:
+            mask = (df['URL'].str.contains(search, case=False, na=False) |
+                    df['Saved To'].str.contains(search, case=False, na=False))
+            df = df[mask]
+        if state_filter != 'All':
+            df = df[df['State'] == state_filter]
 
-    st.caption(f'{len(df):,} records')
-    st.dataframe(df, use_container_width=True, height=500,
-                 column_config={
-                     'URL': st.column_config.LinkColumn('URL'),
-                     'Received': st.column_config.NumberColumn('Received', format='%d bytes'),
-                     'Total':    st.column_config.NumberColumn('Total',    format='%d bytes'),
-                 })
+        st.caption(f'{len(df):,} records')
+        st.dataframe(df, use_container_width=True, height=500,
+                     column_config={
+                         'URL': st.column_config.LinkColumn('URL'),
+                         'Received': st.column_config.NumberColumn('Received', format='%d bytes'),
+                         'Total':    st.column_config.NumberColumn('Total',    format='%d bytes'),
+                     })
 
 # ---- Cookies ---------------------------------------------------------------
 with tab_cook:
     items = st.session_state.cookies
     df = cookies_to_df(items)
 
-    col1, col2, col3 = st.columns([3, 1, 1])
-    with col1:
-        search = st.text_input('Search host or name', key='cook_search', placeholder='Filter…')
-    with col2:
-        secure_only = st.checkbox('Secure only', key='cook_secure')
-    with col3:
-        persistent_only = st.checkbox('Persistent only', key='cook_persist')
+    if df.empty:
+        st.info('No cookies found.')
+    else:
+        col1, col2, col3 = st.columns([3, 1, 1])
+        with col1:
+            search = st.text_input('Search host or name', key='cook_search', placeholder='Filter…')
+        with col2:
+            secure_only = st.checkbox('Secure only', key='cook_secure')
+        with col3:
+            persistent_only = st.checkbox('Persistent only', key='cook_persist')
 
-    if search:
-        mask = (df['Host'].str.contains(search, case=False, na=False) |
-                df['Name'].str.contains(search, case=False, na=False))
-        df = df[mask]
-    if secure_only:
-        df = df[df['Secure']]
-    if persistent_only:
-        df = df[df['Persistent']]
+        if search:
+            mask = (df['Host'].str.contains(search, case=False, na=False) |
+                    df['Name'].str.contains(search, case=False, na=False))
+            df = df[mask]
+        if secure_only:
+            df = df[df['Secure']]
+        if persistent_only:
+            df = df[df['Persistent']]
 
-    st.caption(f'{len(df):,} records')
-    st.dataframe(df, use_container_width=True, height=500)
+        st.caption(f'{len(df):,} records')
+        st.dataframe(df, use_container_width=True, height=500)
 
 # ---- Bookmarks -------------------------------------------------------------
 with tab_bm:
