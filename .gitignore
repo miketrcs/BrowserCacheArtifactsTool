@@ -1,13 +1,25 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
+*.pyc
 *.egg-info/
 dist/
 build/
+
+# Virtual environments
 .env
 .venv/
 venv/
+
+# Output files
 *.db
 *.sqlite
 *.log
-.DS_Store
+
+# Streamlit
 .streamlit/secrets.toml
