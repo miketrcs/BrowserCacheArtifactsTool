@@ -61,8 +61,8 @@ if [ -z "$DEST" ]; then
             [ -z "$DEST" ] && fatal "No path provided."
             ;;
         2)
-            DEST="$HOME/BrowserCacheArtifacts"
-            printf "Installing to: %s\n" "$DEST"
+            DEST="$HOME"
+            printf "Installing to: %s/BrowserCacheArtifacts\n" "$DEST"
             ;;
     esac
 fi
