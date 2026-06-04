@@ -23,3 +23,15 @@ venv/
 
 # Streamlit
 .streamlit/
+
+# Claude Code project settings (device-specific, may contain tool permissions)
+.claude/
+
+# run.sh creates a fake HOME here when launched from the repo directory —
+# it can contain browser profile copies, Streamlit config, and Python cache
+runtime/
+
+# Misc runtime artifacts
+nohup.out
+*.binarycookies
+*.plist
