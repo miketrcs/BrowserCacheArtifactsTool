@@ -11,6 +11,7 @@ import datetime
 import io
 import logging
 import os
+import re
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,7 +47,7 @@ class CachedImage:
     height: int
     size_bytes: int
     data: bytes            # raw image bytes
-    cached_at: Optional[datetime.datetime] = None  # file mtime = when entry was written
+    cached_at: Optional[datetime.datetime] = None  # HTTP Date: header, or file mtime as fallback
 
 
 def _detect_sig(data: bytes, offset: int) -> Optional[str]:
@@ -78,6 +79,29 @@ def _validate_image(raw: bytes) -> Optional[tuple[int, int, str]]:
         w, h = img.size
         return w, h, fmt
     except Exception:
+        return None
+
+
+_HTTP_DATE_RE = re.compile(
+    rb'Date: ([A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT)'
+)
+
+
+def _extract_http_date(data: bytes) -> Optional[datetime.datetime]:
+    """
+    Extract the HTTP Date: response header from a cache entry's raw bytes.
+    This header is written once when the entry is created and never changes,
+    unlike the file mtime which Chrome may update when it rewrites entries.
+    Returns a UTC datetime, or None if the header is absent or malformed.
+    """
+    m = _HTTP_DATE_RE.search(data)
+    if not m:
+        return None
+    try:
+        return datetime.datetime.strptime(
+            m.group(1).decode('ascii'), '%a, %d %b %Y %H:%M:%S GMT'
+        ).replace(tzinfo=datetime.timezone.utc)
+    except (ValueError, UnicodeDecodeError):
         return None
 
 
@@ -121,39 +145,72 @@ def scan_cache(cache_path: str,
                url_filter: str = '',
                min_width: int = 0,
                min_height: int = 0,
-               max_results: int = 500) -> list[CachedImage]:
+               max_results: int = 500,
+               scan_limit: int = 30000) -> list[CachedImage]:
     """
     Scan Chrome's Simple Cache directory for cached images.
 
-    Args:
-        cache_path: Path to the Cache_Data directory.
-        url_filter:  Optional substring to filter URLs (case-insensitive).
-        min_width:   Minimum image width in pixels (0 = no filter).
-        min_height:  Minimum image height in pixels (0 = no filter).
-        max_results: Maximum number of results to return.
+    Chrome's cache can contain 100K+ entries.  A two-phase approach keeps
+    the scan fast while giving date-diverse results:
 
-    Returns:
-        List of CachedImage objects, largest-first by byte size.
+      Phase 1 — stat only (no reads): list all _0 files, sort by mtime
+        descending.  Optionally cap at scan_limit files (default 30 000)
+        to bound I/O time; pass scan_limit=0 to scan everything (~50 s on
+        a large cache).
+
+      Phase 2 — full read + PIL validation on the selected files.
+
+    Cache date: uses the HTTP Date: response header when present (written
+    once at fetch time, unaffected by Chrome rewriting the entry on access).
+    Falls back to file mtime when the header is absent.
     """
     cache_dir = Path(cache_path)
     if not cache_dir.is_dir():
         log.warning(f'Cache directory not found: {cache_path}')
         return []
 
-    results: list[CachedImage] = []
-
+    # Phase 1: stat ALL _0 files — no reads, just mtime (fast even for 174 K files).
+    # Build a per-day bucket of (mtime, fpath, fname) tuples, then sample
+    # scan_limit / num_days files from each day so we cover the full date
+    # range instead of saturating on the most-recently-modified entries.
+    day_file_map: dict[str, list[tuple[float, Path, str]]] = {}
     for fname in os.listdir(cache_dir):
         if not fname.endswith('_0'):
             continue
-
         fpath = cache_dir / fname
         try:
-            fstat = fpath.stat()
+            mtime = fpath.stat().st_mtime
+        except OSError:
+            continue
+        day = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc).strftime('%Y-%m-%d')
+        day_file_map.setdefault(day, []).append((mtime, fpath, fname))
+
+    total_files = sum(len(v) for v in day_file_map.items())  # noqa: SIM118 (compat)
+    total_files = sum(len(v) for v in day_file_map.values())
+    num_days = len(day_file_map)
+
+    # How many files to read per day — divvy up scan_limit evenly across days
+    per_day_scan = max(50, (scan_limit // num_days) if (scan_limit and num_days) else 500)
+
+    selected: list[tuple[float, Path, str]] = []
+    for day_files in day_file_map.values():
+        # Within each day, prefer largest files (they're more likely to be real images)
+        day_files.sort(key=lambda x: x[0], reverse=True)  # newest-within-day first
+        selected.extend(day_files[:per_day_scan])
+
+    total_to_scan = len(selected)
+    log.info(f'Cache stat pass: {total_files} files across {num_days} days; '
+             f'reading {total_to_scan} ({per_day_scan}/day)')
+
+    # Phase 2: read + validate
+    buckets: dict[str, list[CachedImage]] = {}
+
+    for _mtime, fpath, fname in selected:
+        try:
             with open(fpath, 'rb') as fh:
                 data = fh.read()
         except OSError:
             continue
-        cached_at = datetime.datetime.fromtimestamp(fstat.st_mtime, datetime.timezone.utc)
 
         if len(data) < 60:
             continue
@@ -162,21 +219,17 @@ def scan_cache(cache_path: str,
             hdr_magic, version, key_len = struct.unpack_from('<QII', data, 0)
             if hdr_magic != SIMPLE_HEADER_MAGIC:
                 continue
-
             if 24 + key_len > len(data):
                 continue
 
             url = data[24:24 + key_len].decode('utf-8', errors='replace')
             url_lower = url.lower()
 
-            # Quick pre-filter: skip entries that don't look image-related
             if not any(hint in url_lower for hint in IMAGE_URL_HINTS):
-                # Still try if the body starts with an image signature
                 body_off = 24 + key_len
                 if _detect_sig(data, body_off) is None:
                     continue
 
-            # Apply user URL filter
             if url_filter and url_filter.lower() not in url_lower:
                 continue
 
@@ -192,7 +245,11 @@ def scan_cache(cache_path: str,
             if min_height and h < min_height:
                 continue
 
-            results.append(CachedImage(
+            cached_at = (_extract_http_date(data)
+                         or datetime.datetime.fromtimestamp(_mtime, datetime.timezone.utc))
+
+            day = cached_at.strftime('%Y-%m-%d')
+            buckets.setdefault(day, []).append(CachedImage(
                 filename=fname,
                 url=url,
                 mime_type=mime,
@@ -207,10 +264,18 @@ def scan_cache(cache_path: str,
             log.debug(f'Error processing {fname}: {e}')
             continue
 
-    # Sort newest-first; fall back to size for entries with identical timestamps
-    _epoch = datetime.datetime.fromtimestamp(0, datetime.timezone.utc)
-    results.sort(key=lambda x: (x.cached_at or _epoch, x.size_bytes), reverse=True)
-    return results[:max_results]
+    if not buckets:
+        return []
+
+    # Flatten: newest day first, largest image first within each day
+    all_results: list[CachedImage] = []
+    for day in sorted(buckets.keys(), reverse=True):
+        all_results.extend(sorted(buckets[day], key=lambda x: x.size_bytes, reverse=True))
+
+    returned = all_results[:max_results] if max_results else all_results
+    log.info(f'  → {len(all_results)} images across {len(buckets)} days, '
+             f'returning {len(returned)}')
+    return returned
 
 
 def default_cache_path(profile_path: str) -> str:

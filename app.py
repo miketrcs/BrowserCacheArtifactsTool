@@ -241,7 +241,9 @@ if load_btn:
 
             with st.spinner('Scanning cache for images… (this may take a moment)'):
                 cache_dir = default_cache_path(profile)
-                st.session_state.images = scan_cache(cache_dir, max_results=500)
+                # scan_limit=30000 covers the most recent ~30k entries fast;
+                # max_results=0 returns everything found (display capped by "Show" control)
+                st.session_state.images = scan_cache(cache_dir, max_results=0, scan_limit=30000)
 
         elif browser == 'Firefox':
             st.session_state.version = ['Firefox']
@@ -482,7 +484,7 @@ with tab_bm:
 with tab_img:
     images = st.session_state.images or []
 
-    col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 1])
+    col1, col2, col3, col4, col5, col6 = st.columns([3, 1, 1, 1, 1, 1])
     with col1:
         img_search = st.text_input('Filter by URL', key='img_search', placeholder='e.g. amazon, youtube…')
     with col2:
@@ -491,13 +493,14 @@ with tab_img:
     with col3:
         min_w = st.number_input('Min width px', min_value=0, value=0, step=10, key='img_minw')
     with col4:
-        # Build date options from available cached_at values
         dates = sorted(
             {i.cached_at.strftime('%Y-%m-%d') for i in images if getattr(i, 'cached_at', None)},
             reverse=True,
         )
         date_filter = st.selectbox('Cached date', ['All'] + dates, key='img_date')
     with col5:
+        show_limit = st.selectbox('Show', [200, 500, 1000, 2000, 'All'], index=0, key='img_limit')
+    with col6:
         cols_per_row = st.selectbox('Columns', [2, 3, 4, 5, 6], index=2, key='img_cols')
 
     # Apply filters
@@ -513,13 +516,15 @@ with tab_img:
                          if getattr(i, 'cached_at', None)
                          and i.cached_at.strftime('%Y-%m-%d') == date_filter]
 
-    st.caption(f'{len(filtered_imgs):,} images  ·  sorted newest first  ·  click any image to open its source URL')
+    display_imgs = filtered_imgs if show_limit == 'All' else filtered_imgs[:int(show_limit)]
+    total_str = f'{len(filtered_imgs):,}' + (f' (showing {len(display_imgs):,})' if len(display_imgs) < len(filtered_imgs) else '')
+    st.caption(f'{total_str} images  ·  sorted newest first  ·  click any image to open its source URL')
 
-    if not filtered_imgs:
+    if not display_imgs:
         st.info('No cached images match the current filters.')
     else:
-        for row_start in range(0, len(filtered_imgs), cols_per_row):
-            row_imgs = filtered_imgs[row_start:row_start + cols_per_row]
+        for row_start in range(0, len(display_imgs), cols_per_row):
+            row_imgs = display_imgs[row_start:row_start + cols_per_row]
             cols = st.columns(cols_per_row)
             for col, img in zip(cols, row_imgs):
                 with col:
