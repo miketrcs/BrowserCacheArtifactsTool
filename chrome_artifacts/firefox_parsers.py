@@ -59,15 +59,28 @@ def _open_db(path: str) -> sqlite3.Connection | None:
         return None
 
 
+def _places_mtime(profile_dir: Path) -> float:
+    """Return the mtime of places.sqlite, or 0 if absent."""
+    db = profile_dir / 'places.sqlite'
+    try:
+        return db.stat().st_mtime if db.exists() else 0.0
+    except OSError:
+        return 0.0
+
+
 def default_profile_path() -> str:
     """
-    Auto-detect the most recently active Firefox profile on macOS.
+    Auto-detect the most recently *active* Firefox profile on macOS.
 
-    Priority:
-      1. profiles.ini [InstallXXX] Default= (the last-used install's profile)
-      2. Newest *.default-release directory
-      3. Newest *.default directory
-      4. Any newest profile directory
+    Strategy: collect every candidate profile from profiles.ini [InstallXXX]
+    sections and from *.default-release / *.default directory globs, then
+    rank all of them by the modification time of places.sqlite and return the
+    most recently written one.
+
+    Ranking by places.sqlite mtime is more reliable than trusting the ini
+    pointer alone — the ini Default= can point at a stale/secondary profile
+    that hasn't been used in months while the real active profile lives in a
+    different directory.
     """
     real_home = Path(os.environ.get('REAL_HOME', str(Path.home())))
     ff_base = real_home / 'Library/Application Support/Firefox'
@@ -76,6 +89,9 @@ def default_profile_path() -> str:
     if not profiles_dir.is_dir():
         return str(profiles_dir)
 
+    candidates: list[Path] = []
+
+    # Gather from [InstallXXX] sections in profiles.ini
     ini_path = ff_base / 'profiles.ini'
     if ini_path.exists():
         try:
@@ -86,25 +102,31 @@ def default_profile_path() -> str:
                     rel = cfg.get(section, 'Default')
                     candidate = ff_base / rel
                     if candidate.is_dir():
-                        return str(candidate)
+                        candidates.append(candidate)
         except Exception:
             pass
 
+    # Gather from directory globs (catches profiles not in any Install section)
     for pattern in ('*.default-release', '*.default'):
-        matches = sorted(
-            [p for p in profiles_dir.glob(pattern) if p.is_dir()],
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        if matches:
-            return str(matches[0])
+        for p in profiles_dir.glob(pattern):
+            if p.is_dir() and p not in candidates:
+                candidates.append(p)
 
-    dirs = sorted(
-        [p for p in profiles_dir.iterdir() if p.is_dir()],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    return str(dirs[0]) if dirs else str(profiles_dir)
+    # Also include any other profile directories
+    for p in profiles_dir.iterdir():
+        if p.is_dir() and p not in candidates:
+            candidates.append(p)
+
+    if not candidates:
+        return str(profiles_dir)
+
+    # Pick the profile whose places.sqlite was most recently modified —
+    # that is definitively the active profile.
+    best = max(candidates, key=_places_mtime)
+    if _places_mtime(best) == 0:
+        # No profile has a places.sqlite — fall back to first candidate
+        return str(candidates[0])
+    return str(best)
 
 
 # ---------------------------------------------------------------------------
