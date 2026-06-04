@@ -24,6 +24,12 @@ from chrome_artifacts.safari_parsers import (
     default_paths as safari_default_paths,
 )
 from chrome_artifacts.safari_cache import scan_safari_cache
+from chrome_artifacts.firefox_parsers import (
+    parse_firefox_history, parse_firefox_downloads,
+    parse_firefox_cookies, parse_firefox_bookmarks,
+    default_profile_path as _firefox_default_profile,
+)
+from chrome_artifacts.firefox_cache import scan_firefox_cache
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -38,9 +44,10 @@ st.set_page_config(
 import os
 import subprocess
 _home = Path(os.environ.get('REAL_HOME', str(Path.home())))
-DEFAULT_CHROME_PROFILE = str(_home / 'Library/Application Support/Google/Chrome/Default')
-DEFAULT_EDGE_PROFILE   = str(_home / 'Library/Application Support/Microsoft Edge/Default')
-DEFAULT_SAFARI_ROOT    = str(_home / 'Library/Safari')
+DEFAULT_CHROME_PROFILE   = str(_home / 'Library/Application Support/Google/Chrome/Default')
+DEFAULT_EDGE_PROFILE     = str(_home / 'Library/Application Support/Microsoft Edge/Default')
+DEFAULT_FIREFOX_PROFILE  = _firefox_default_profile()
+DEFAULT_SAFARI_ROOT      = str(_home / 'Library/Safari')
 
 
 def _check_safari_permissions(safari_root: str) -> bool:
@@ -138,7 +145,7 @@ with st.sidebar:
 
     browser = st.radio(
         'Browser',
-        ['Chrome', 'Edge', 'Safari'],
+        ['Chrome', 'Edge', 'Firefox', 'Safari'],
         horizontal=True,
     )
 
@@ -159,6 +166,15 @@ with st.sidebar:
             value=False,
             help='Read DB files directly — faster, but may fail if the browser is open',
         )
+    elif browser == 'Firefox':
+        profile_path = st.text_input(
+            'Profile directory',
+            value=DEFAULT_FIREFOX_PROFILE,
+            help='Path to Firefox profile folder (auto-detected from profiles.ini)',
+        )
+        decrypt = False
+        no_copy = False
+        st.caption('Firefox cookies are stored as plaintext — no decryption needed.')
     else:
         profile_path = st.text_input(
             'Safari data directory',
@@ -226,6 +242,21 @@ if load_btn:
             with st.spinner('Scanning cache for images… (this may take a moment)'):
                 cache_dir = default_cache_path(profile)
                 st.session_state.images = scan_cache(cache_dir, max_results=500)
+
+        elif browser == 'Firefox':
+            st.session_state.version = ['Firefox']
+            st.session_state.perm_error = False
+
+            with st.spinner('Parsing Firefox history…'):
+                st.session_state.history = parse_firefox_history(profile)
+            with st.spinner('Parsing Firefox downloads…'):
+                st.session_state.downloads = parse_firefox_downloads(profile)
+            with st.spinner('Parsing Firefox cookies…'):
+                st.session_state.cookies = parse_firefox_cookies(profile)
+            with st.spinner('Parsing Firefox bookmarks…'):
+                st.session_state.bookmarks = parse_firefox_bookmarks(profile)
+            with st.spinner('Scanning Firefox cache for images…'):
+                st.session_state.images = scan_firefox_cache(profile, max_results=500)
 
         else:  # Safari
             st.session_state.version = ['Safari']
@@ -309,6 +340,8 @@ active_browser = st.session_state.browser or 'Browser'
 v = st.session_state.version
 if isinstance(v, list) and len(v) > 1 and active_browser in ('Chrome', 'Edge'):
     version_str = f'{active_browser} version range: {v[0]}–{v[-1]}'
+elif active_browser == 'Firefox':
+    version_str = 'Firefox'
 else:
     version_str = active_browser
 
