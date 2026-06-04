@@ -40,7 +40,9 @@ IMAGE_SIGNATURES = {
     b'<svg':               'image/svg+xml',
 }
 
-IMAGE_URL_HINTS = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.ico', '.svg', '.bmp')
+_AVIF_BRANDS = {b'avif', b'avis', b'MA1A', b'MiHA'}
+
+IMAGE_URL_HINTS = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.ico', '.svg', '.bmp', '.avif')
 
 
 @dataclass
@@ -65,6 +67,9 @@ def _detect_mime(data: bytes) -> Optional[str]:
                     return mime
             else:
                 return mime
+    # AVIF: ISOBMFF ftyp box — 4-byte size, then 'ftyp', then major brand
+    if len(data) >= 12 and data[4:8] == b'ftyp' and data[8:12] in _AVIF_BRANDS:
+        return 'image/avif'
     return None
 
 

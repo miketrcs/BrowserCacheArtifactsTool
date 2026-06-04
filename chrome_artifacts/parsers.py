@@ -78,7 +78,7 @@ def detect_version(profile_path: str, no_copy: bool = False, temp_dir: str = Non
     Returns a list of possible version numbers (lowest is most relevant).
     Adapted from hindsight's determine_version() — trimmed to tables we use.
     """
-    versions = list(range(1, 146))
+    versions = list(range(1, 151))
 
     def trim_above(v):
         versions[:] = [x for x in versions if x >= v]

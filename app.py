@@ -39,6 +39,7 @@ import os
 import subprocess
 _home = Path(os.environ.get('REAL_HOME', str(Path.home())))
 DEFAULT_CHROME_PROFILE = str(_home / 'Library/Application Support/Google/Chrome/Default')
+DEFAULT_EDGE_PROFILE   = str(_home / 'Library/Application Support/Microsoft Edge/Default')
 DEFAULT_SAFARI_ROOT    = str(_home / 'Library/Safari')
 
 
@@ -137,15 +138,16 @@ with st.sidebar:
 
     browser = st.radio(
         'Browser',
-        ['Chrome', 'Safari'],
+        ['Chrome', 'Edge', 'Safari'],
         horizontal=True,
     )
 
-    if browser == 'Chrome':
+    if browser in ('Chrome', 'Edge'):
+        default_profile = DEFAULT_CHROME_PROFILE if browser == 'Chrome' else DEFAULT_EDGE_PROFILE
         profile_path = st.text_input(
             'Profile directory',
-            value=DEFAULT_CHROME_PROFILE,
-            help='Path to the Chrome profile folder (usually "Default")',
+            value=default_profile,
+            help='Path to the browser profile folder (usually "Default")',
         )
         decrypt = st.toggle(
             'Decrypt cookies',
@@ -155,7 +157,7 @@ with st.sidebar:
         no_copy = st.toggle(
             'No file copy',
             value=False,
-            help='Read DB files directly — faster, but may fail if Chrome is open',
+            help='Read DB files directly — faster, but may fail if the browser is open',
         )
     else:
         profile_path = st.text_input(
@@ -197,8 +199,9 @@ if load_btn:
     else:
         st.session_state.browser = browser
 
-        if browser == 'Chrome':
-            with st.spinner('Detecting Chrome version…'):
+        if browser in ('Chrome', 'Edge'):
+            browser_label = browser
+            with st.spinner(f'Detecting {browser_label} version…'):
                 version = detect_version(profile, no_copy=no_copy)
             st.session_state.version = version
 
@@ -206,7 +209,7 @@ if load_btn:
             if decrypt:
                 try:
                     from chrome_artifacts.decrypt import MacDecryptor
-                    decryptor = MacDecryptor()
+                    decryptor = MacDecryptor(browser=browser_label)
                 except Exception as e:
                     st.warning(f'Could not initialise decryptor: {e}')
 
@@ -304,8 +307,8 @@ if st.session_state.perm_error:
 # Summary metrics
 active_browser = st.session_state.browser or 'Browser'
 v = st.session_state.version
-if isinstance(v, list) and len(v) > 1:
-    version_str = f'Chrome version range: {v[0]}–{v[-1]}'
+if isinstance(v, list) and len(v) > 1 and active_browser in ('Chrome', 'Edge'):
+    version_str = f'{active_browser} version range: {v[0]}–{v[-1]}'
 else:
     version_str = active_browser
 

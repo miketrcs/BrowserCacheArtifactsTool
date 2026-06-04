@@ -30,28 +30,38 @@ def _aes_decrypt(data: bytes, key: bytes) -> bytes:
     return decrypted[:-pad_len]
 
 
+_KEYCHAIN_SERVICES = {
+    'Chrome': ('Chrome Safe Storage', 'Chrome'),
+    'Edge':   ('Microsoft Edge Safe Storage', 'Microsoft Edge'),
+}
+
+
 class MacDecryptor:
     """
     Lazy-initialised decryptor. Fetches the Keychain password once and
     caches the derived AES key for the lifetime of the object.
     """
 
-    def __init__(self):
+    def __init__(self, browser: str = 'Chrome'):
         if sys.platform != 'darwin':
             raise RuntimeError('MacDecryptor is only supported on macOS')
+        if browser not in _KEYCHAIN_SERVICES:
+            raise ValueError(f'Unsupported browser: {browser}. Choose from: {list(_KEYCHAIN_SERVICES)}')
+        self._browser = browser
         self._key: bytes | None = None
 
     def _ensure_key(self):
         if self._key is not None:
             return
+        service, account = _KEYCHAIN_SERVICES[self._browser]
         try:
             import keyring
-            password = keyring.get_password('Chrome Safe Storage', 'Chrome')
+            password = keyring.get_password(service, account)
             if password is None:
-                raise ValueError('Chrome Safe Storage password not found in Keychain')
+                raise ValueError(f'{service} password not found in Keychain')
             self._key = _derive_key(password)
         except Exception as e:
-            raise RuntimeError(f'Could not retrieve Chrome decryption key: {e}') from e
+            raise RuntimeError(f'Could not retrieve {self._browser} decryption key: {e}') from e
 
     def decrypt(self, encrypted_value: bytes) -> str | None:
         """

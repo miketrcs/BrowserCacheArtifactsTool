@@ -29,8 +29,11 @@ IMAGE_SIGNATURES = {
     b'<svg':               'image/svg+xml',
 }
 
+# AVIF brands (ISOBMFF ftyp box at offset 4): bytes[4:8] == b'ftyp', bytes[8:12] is the brand
+_AVIF_BRANDS = {b'avif', b'avis', b'MA1A', b'MiHA'}
+
 # Extensions that imply image content in the URL
-IMAGE_URL_HINTS = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.ico', '.svg', '.bmp')
+IMAGE_URL_HINTS = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.ico', '.svg', '.bmp', '.avif')
 
 
 @dataclass
@@ -55,6 +58,9 @@ def _detect_sig(data: bytes, offset: int) -> Optional[str]:
                     return mime
             else:
                 return mime
+    # AVIF: ISOBMFF ftyp box — 4-byte size, then 'ftyp', then major brand
+    if len(chunk) >= 12 and chunk[4:8] == b'ftyp' and chunk[8:12] in _AVIF_BRANDS:
+        return 'image/avif'
     return None
 
 
@@ -202,12 +208,13 @@ def scan_cache(cache_path: str,
 
 
 def default_cache_path(profile_path: str) -> str:
-    """Return the default Chrome cache directory for a given profile path."""
-    import os
-    # Use REAL_HOME if set (USB mode), otherwise fall back to Path.home()
+    """Return the default cache directory for a given Chromium-based profile path."""
     home = Path(os.environ.get('REAL_HOME', str(Path.home())))
-    mac_cache = home / 'Library/Caches/Google/Chrome/Default/Cache/Cache_Data'
+    # Infer browser from profile path to pick the right Caches subfolder
+    if 'Microsoft Edge' in profile_path:
+        mac_cache = home / 'Library/Caches/Microsoft Edge/Default/Cache/Cache_Data'
+    else:
+        mac_cache = home / 'Library/Caches/Google/Chrome/Default/Cache/Cache_Data'
     if mac_cache.is_dir():
         return str(mac_cache)
-    # Fallback: cache inside profile (less common on macOS)
     return str(Path(profile_path) / 'Cache/Cache_Data')

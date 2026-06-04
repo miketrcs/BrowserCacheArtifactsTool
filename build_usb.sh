@@ -19,8 +19,8 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 # Config — update these when new python-build-standalone releases come out
 # -----------------------------------------------------------------------------
-PY_TAG="20260325"
-PY_VER="3.13.12"
+PY_TAG="20260602"
+PY_VER="3.13.13"
 PY_BASE="https://github.com/astral-sh/python-build-standalone/releases/download/${PY_TAG}"
 PY_ARM64_URL="${PY_BASE}/cpython-${PY_VER}%2B${PY_TAG}-aarch64-apple-darwin-install_only.tar.gz"
 PY_X86_URL="${PY_BASE}/cpython-${PY_VER}%2B${PY_TAG}-x86_64-apple-darwin-install_only.tar.gz"

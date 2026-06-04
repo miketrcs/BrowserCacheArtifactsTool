@@ -4,20 +4,20 @@ A macOS-focused browser artifact browser with a Streamlit GUI. Browse history, d
 
 ![Python](https://img.shields.io/badge/python-3.13-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 ---
 
 ## Features
 
-| | Chrome | Safari |
-|---|---|---|
-| History | ✅ | ✅ |
-| Downloads | ✅ | ✅ |
-| Cookies | ✅ (with optional decryption) | ✅ |
-| Bookmarks | ✅ | ✅ |
-| Cached Images | ✅ Simple Cache | ✅ WebKitCache + Cache.db |
-| SQLite Export | ✅ | ✅ |
+| | Chrome | Edge | Safari |
+|---|---|---|---|
+| History | ✅ | ✅ | ✅ |
+| Downloads | ✅ | ✅ | ✅ |
+| Cookies | ✅ (with optional decryption) | ✅ (with optional decryption) | ✅ |
+| Bookmarks | ✅ | ✅ | ✅ |
+| Cached Images | ✅ Simple Cache | ✅ Simple Cache | ✅ WebKitCache + Cache.db |
+| SQLite Export | ✅ | ✅ | ✅ |
 
 - **Fully local** — runs on `localhost`, no telemetry, no cloud, no data leaves your machine
 - **Zero footprint USB mode** — run from a USB key without writing anything to the target Mac
@@ -128,6 +128,7 @@ Open your browser to `http://localhost:8502` after launching `run.sh`.
 **Default paths (auto-populated):**
 ```
 Chrome:  ~/Library/Application Support/Google/Chrome/Default
+Edge:    ~/Library/Application Support/Microsoft Edge/Default
 Safari:  ~/Library/Safari
 ```
 
@@ -185,7 +186,8 @@ BrowserCacheArtifactsTool/
   - `WebKitCache/Version N/Blobs/` — the full web browser image cache (~500+ images typical)
   - `Cache.db` — Apple-service thumbnails and icons
   URLs are recovered by parsing binary metadata files in `Records/`.
-- **Chrome version detection** is automatic based on database schema. Tested against Chrome v1–v145.
+- **Chrome/Edge version detection** is automatic based on database schema. Tested against Chrome/Edge v1–v150.
+- **AVIF image support** — both Chrome/Edge and Safari caches now detect and display AVIF images (requires Pillow with libavif).
 
 ---
 
@@ -203,6 +205,6 @@ A significant portion of the Chrome artifact parsing logic — particularly the 
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+Apache License 2.0 — see [LICENSE](LICENSE) for details.
 
-This project incorporates logic adapted from [Hindsight](https://github.com/obsidianforensics/hindsight), licensed under the Apache License 2.0. Adapted portions include Chrome artifact parsing queries and decryption logic in `chrome_artifacts/parsers.py` and `chrome_artifacts/decrypt.py`.
+This project incorporates logic adapted from [Hindsight](https://github.com/obsidianforensics/hindsight), also licensed under the Apache License 2.0. Adapted portions include Chrome artifact parsing queries and decryption logic in `chrome_artifacts/parsers.py` and `chrome_artifacts/decrypt.py`.
