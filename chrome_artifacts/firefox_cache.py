@@ -13,6 +13,7 @@ The metadata's exact field layout has changed across Firefox versions, so the
 URL is extracted via regex scan rather than fixed field offsets — this works
 across all versions observed in testing (Firefox 100+).
 """
+import datetime
 import io
 import logging
 import os
@@ -51,6 +52,7 @@ class FirefoxCachedImage:
     height: int
     size_bytes: int
     data: bytes
+    cached_at: Optional[datetime.datetime] = None
 
 
 def _detect_mime(data: bytes) -> Optional[str]:
@@ -147,6 +149,7 @@ def scan_firefox_cache(profile_path: str,
         if not entry_path.is_file():
             continue
         try:
+            fstat = entry_path.stat()
             data = entry_path.read_bytes()
         except OSError:
             continue
@@ -172,11 +175,13 @@ def scan_firefox_cache(profile_path: str,
         if (min_width and w < min_width) or (min_height and h < min_height):
             continue
 
+        cached_at = datetime.datetime.fromtimestamp(fstat.st_mtime, datetime.timezone.utc)
         results.append(FirefoxCachedImage(
             url=url, mime_type=mime, width=w, height=h,
-            size_bytes=len(body), data=body,
+            size_bytes=len(body), data=body, cached_at=cached_at,
         ))
 
-    results.sort(key=lambda x: x.size_bytes, reverse=True)
+    _epoch = datetime.datetime.fromtimestamp(0, datetime.timezone.utc)
+    results.sort(key=lambda x: (x.cached_at or _epoch, x.size_bytes), reverse=True)
     log.info(f'Found {len(results)} Firefox cached images')
     return results[:max_results]

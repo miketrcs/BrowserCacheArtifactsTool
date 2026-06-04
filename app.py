@@ -482,7 +482,7 @@ with tab_bm:
 with tab_img:
     images = st.session_state.images or []
 
-    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+    col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 1])
     with col1:
         img_search = st.text_input('Filter by URL', key='img_search', placeholder='e.g. amazon, youtube…')
     with col2:
@@ -491,6 +491,13 @@ with tab_img:
     with col3:
         min_w = st.number_input('Min width px', min_value=0, value=0, step=10, key='img_minw')
     with col4:
+        # Build date options from available cached_at values
+        dates = sorted(
+            {i.cached_at.strftime('%Y-%m-%d') for i in images if getattr(i, 'cached_at', None)},
+            reverse=True,
+        )
+        date_filter = st.selectbox('Cached date', ['All'] + dates, key='img_date')
+    with col5:
         cols_per_row = st.selectbox('Columns', [2, 3, 4, 5, 6], index=2, key='img_cols')
 
     # Apply filters
@@ -501,8 +508,12 @@ with tab_img:
         filtered_imgs = [i for i in filtered_imgs if i.mime_type == mime_filter]
     if min_w > 0:
         filtered_imgs = [i for i in filtered_imgs if i.width >= min_w]
+    if date_filter != 'All':
+        filtered_imgs = [i for i in filtered_imgs
+                         if getattr(i, 'cached_at', None)
+                         and i.cached_at.strftime('%Y-%m-%d') == date_filter]
 
-    st.caption(f'{len(filtered_imgs):,} images  ·  click any image to open its source URL')
+    st.caption(f'{len(filtered_imgs):,} images  ·  sorted newest first  ·  click any image to open its source URL')
 
     if not filtered_imgs:
         st.info('No cached images match the current filters.')
@@ -517,7 +528,9 @@ with tab_img:
                     except Exception:
                         st.warning('Cannot render')
                     label = img.url.split('?')[0].split('/')[-1][:30] or getattr(img, 'filename', img.url[:20])
+                    date_str = img.cached_at.strftime('%Y-%m-%d %H:%M') if getattr(img, 'cached_at', None) else ''
                     st.caption(
                         f'[{label}]({img.url})  \n'
                         f'{img.width}×{img.height} · {img.size_bytes:,}B · {img.mime_type.split("/")[-1]}'
+                        + (f'  \n{date_str}' if date_str else '')
                     )

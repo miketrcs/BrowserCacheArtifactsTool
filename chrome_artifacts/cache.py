@@ -7,6 +7,7 @@ Chrome stores its HTTP cache in Simple Cache format. Each `_0` file contains:
 Image body data starts immediately after the key and ends just before the
 first SimpleFileEOF magic marker. PIL is used to validate each candidate.
 """
+import datetime
 import io
 import logging
 import os
@@ -45,6 +46,7 @@ class CachedImage:
     height: int
     size_bytes: int
     data: bytes            # raw image bytes
+    cached_at: Optional[datetime.datetime] = None  # file mtime = when entry was written
 
 
 def _detect_sig(data: bytes, offset: int) -> Optional[str]:
@@ -146,10 +148,12 @@ def scan_cache(cache_path: str,
 
         fpath = cache_dir / fname
         try:
+            fstat = fpath.stat()
             with open(fpath, 'rb') as fh:
                 data = fh.read()
         except OSError:
             continue
+        cached_at = datetime.datetime.fromtimestamp(fstat.st_mtime, datetime.timezone.utc)
 
         if len(data) < 60:
             continue
@@ -196,14 +200,16 @@ def scan_cache(cache_path: str,
                 height=h,
                 size_bytes=len(img_bytes),
                 data=img_bytes,
+                cached_at=cached_at,
             ))
 
         except Exception as e:
             log.debug(f'Error processing {fname}: {e}')
             continue
 
-    # Sort by file size descending (larger/more interesting images first)
-    results.sort(key=lambda x: x.size_bytes, reverse=True)
+    # Sort newest-first; fall back to size for entries with identical timestamps
+    _epoch = datetime.datetime.fromtimestamp(0, datetime.timezone.utc)
+    results.sort(key=lambda x: (x.cached_at or _epoch, x.size_bytes), reverse=True)
     return results[:max_results]
 
 

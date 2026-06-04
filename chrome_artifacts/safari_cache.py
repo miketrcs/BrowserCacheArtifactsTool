@@ -18,6 +18,7 @@ Strategy:
   • Scan Blobs/ for image magic bytes; look up URLs from the index.
   • Also scan Cache.db (inline + fsCachedData) as before.
 """
+import datetime
 import io
 import logging
 import os
@@ -53,6 +54,7 @@ class SafariCachedImage:
     height: int
     size_bytes: int
     data: bytes
+    cached_at: Optional[datetime.datetime] = None
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +141,7 @@ def _scan_cache_db(cache_base: Path, url_filter: str,
     results: list[SafariCachedImage] = []
     try:
         sql = """
-            SELECT r.request_key AS url, d.isDataOnFS, d.receiver_data
+            SELECT r.request_key AS url, r.time_stamp, d.isDataOnFS, d.receiver_data
             FROM cfurl_cache_response r
             JOIN cfurl_cache_receiver_data d ON r.entry_ID = d.entry_ID
             WHERE d.receiver_data IS NOT NULL
@@ -160,9 +162,15 @@ def _scan_cache_db(cache_base: Path, url_filter: str,
             w, h = dims
             if (min_width and w < min_width) or (min_height and h < min_height):
                 continue
+            ts = row['time_stamp']
+            try:
+                cached_at = (datetime.datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+                             .replace(tzinfo=datetime.timezone.utc)) if ts else None
+            except ValueError:
+                cached_at = None
             results.append(SafariCachedImage(
                 url=url, mime_type=mime, width=w, height=h,
-                size_bytes=len(blob), data=blob,
+                size_bytes=len(blob), data=blob, cached_at=cached_at,
             ))
     except sqlite3.Error as e:
         log.error(f'Error scanning Safari Cache.db: {e}')
@@ -290,6 +298,7 @@ def _scan_webkit_cache(webkit_cache: Path, url_filter: str,
 
     for blob_path in blobs_dir.iterdir():
         try:
+            fstat = blob_path.stat()
             data = blob_path.read_bytes()
         except OSError:
             continue
@@ -312,6 +321,7 @@ def _scan_webkit_cache(webkit_cache: Path, url_filter: str,
         if (min_width and w < min_width) or (min_height and h < min_height):
             continue
 
+        cached_at = datetime.datetime.fromtimestamp(fstat.st_mtime, datetime.timezone.utc)
         results.append(SafariCachedImage(
             url=url or f'[unknown — {blob_path.name[:16]}…]',
             mime_type=mime,
@@ -319,6 +329,7 @@ def _scan_webkit_cache(webkit_cache: Path, url_filter: str,
             height=h,
             size_bytes=len(data),
             data=data,
+            cached_at=cached_at,
         ))
 
     return results
@@ -354,7 +365,8 @@ def scan_safari_cache(safari_root: str,
     else:
         log.info('No WebKitCache directory found')
 
-    results.sort(key=lambda x: x.size_bytes, reverse=True)
+    _epoch = datetime.datetime.fromtimestamp(0, datetime.timezone.utc)
+    results.sort(key=lambda x: (x.cached_at or _epoch, x.size_bytes), reverse=True)
     log.info(f'Found {len(results)} Safari cached images total')
     return results[:max_results]
 
