@@ -50,17 +50,23 @@ DEFAULT_FIREFOX_PROFILE  = _firefox_default_profile()
 DEFAULT_SAFARI_ROOT      = str(_home / 'Library/Safari')
 
 
-def _check_safari_permissions(safari_root: str) -> bool:
-    """Return True if we can read Safari's protected files."""
-    test_path = Path(safari_root) / 'History.db'
+def _probe_permissions(test_path: Path) -> bool:
+    """
+    Try to read one byte from test_path.
+    Returns True if accessible (or file simply doesn't exist yet).
+    Returns False only on PermissionError.
+    The actual read attempt is what triggers the macOS TCC consent dialog.
+    """
+    if not test_path.exists():
+        return True  # Missing file is not a permissions problem
     try:
         with open(test_path, 'rb') as f:
             f.read(1)
         return True
     except PermissionError:
         return False
-    except FileNotFoundError:
-        return True  # File missing is fine, not a permissions problem
+    except OSError:
+        return True  # Other OS errors are not permission-related
 
 
 def _open_full_disk_access_settings():
@@ -215,6 +221,13 @@ if load_btn:
         st.session_state.browser = browser
 
         if browser in ('Chrome', 'Edge'):
+            # Probe permissions — the read attempt triggers the macOS dialog if needed
+            if not _probe_permissions(Path(profile) / 'History'):
+                st.session_state.perm_error = browser
+                st.session_state.loaded = True
+                st.rerun()
+
+            st.session_state.perm_error = False
             browser_label = browser
             with st.spinner(f'Detecting {browser_label} version…'):
                 version = detect_version(profile, no_copy=no_copy)
@@ -243,8 +256,14 @@ if load_btn:
                 st.session_state.images = scan_cache(cache_dir, max_results=0, scan_limit=30000)
 
         elif browser == 'Firefox':
-            st.session_state.version = ['Firefox']
+            # Probe permissions — the read attempt triggers the macOS dialog if needed
+            if not _probe_permissions(Path(profile) / 'places.sqlite'):
+                st.session_state.perm_error = 'Firefox'
+                st.session_state.loaded = True
+                st.rerun()
+
             st.session_state.perm_error = False
+            st.session_state.version = ['Firefox']
 
             with st.spinner('Parsing Firefox history…'):
                 st.session_state.history = parse_firefox_history(profile)
@@ -258,10 +277,14 @@ if load_btn:
                 st.session_state.images = scan_firefox_cache(profile, max_results=0, scan_limit=30000)
 
         else:  # Safari
-            st.session_state.version = ['Safari']
+            # Probe permissions — the read attempt triggers the macOS dialog if needed
+            if not _probe_permissions(Path(profile) / 'History.db'):
+                st.session_state.perm_error = 'Safari'
+                st.session_state.loaded = True
+                st.rerun()
 
-            _safari_perm_ok = _check_safari_permissions(profile)
-            st.session_state.perm_error = not _safari_perm_ok
+            st.session_state.perm_error = False
+            st.session_state.version = ['Safari']
 
             with st.spinner('Parsing Safari history…'):
                 st.session_state.history = parse_safari_history(profile)
@@ -314,22 +337,41 @@ if not st.session_state.loaded:
     st.info('Tip: close the browser before loading to ensure all databases are accessible.')
     st.stop()
 
-# Permission error banner (Safari only)
+# Permission error banner — shown for any browser that was denied
 if st.session_state.perm_error:
-    st.error(
-        '**macOS Full Disk Access required for Safari data.**\n\n'
-        'Safari\'s files are protected by macOS privacy controls. '
-        'Grant **Full Disk Access** to Terminal (or your shell), then restart the app.'
-    )
-    if st.button('Open Privacy & Security Settings →'):
-        _open_full_disk_access_settings()
-    st.markdown(
-        '**Steps:**\n'
-        '1. Click the button above (or go to **System Settings → Privacy & Security → Full Disk Access**)\n'
-        '2. Click **+** and add **Terminal** (or iTerm2 / whichever app you launched this from)\n'
-        '3. Quit Terminal completely and relaunch\n'
-        '4. Run `~/BrowserCacheArtifacts/run.sh` again'
-    )
+    denied_browser = st.session_state.perm_error  # browser name string
+
+    if denied_browser == 'Safari':
+        st.error(
+            f'**macOS Full Disk Access required for {denied_browser} data.**\n\n'
+            'Safari\'s files are protected by macOS privacy controls. '
+            'Grant **Full Disk Access** to Terminal (or your shell), then restart the app.'
+        )
+        if st.button('Open Privacy & Security Settings →'):
+            _open_full_disk_access_settings()
+        st.markdown(
+            '**Steps:**\n'
+            '1. Click the button above (or go to **System Settings → Privacy & Security → Full Disk Access**)\n'
+            '2. Click **+** and add **Terminal** (or iTerm2 / whichever app you launched this from)\n'
+            '3. Quit Terminal completely and relaunch\n'
+            '4. Run `~/BrowserCacheArtifacts/run.sh` again'
+        )
+    else:
+        st.error(
+            f'**macOS privacy access required for {denied_browser} data.**\n\n'
+            'A macOS permission dialog may have appeared — if so, click **Allow** and then '
+            'click **Load Profile** again.\n\n'
+            'If no dialog appeared, grant access manually:'
+        )
+        if st.button('Open Privacy & Security Settings →'):
+            _open_full_disk_access_settings()
+        st.markdown(
+            '**Steps:**\n'
+            '1. Go to **System Settings → Privacy & Security → Full Disk Access** '
+            '(or **Files and Folders**)\n'
+            '2. Click **+** and add **Terminal** (or whichever app you launched this from)\n'
+            '3. Click **Load Profile** again — no restart needed'
+        )
     st.divider()
 
 # Summary metrics
