@@ -56,6 +56,7 @@ def _open_db(path: str) -> sqlite3.Connection | None:
         return conn
     except Exception as e:
         log.error(f'Could not open {path}: {e}')
+        shutil.rmtree(tmp, ignore_errors=True)
         return None
 
 

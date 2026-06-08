@@ -8,34 +8,20 @@ Image body data starts immediately after the key and ends just before the
 first SimpleFileEOF magic marker. PIL is used to validate each candidate.
 """
 import datetime
-import io
 import logging
 import os
 import re
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from .cache_utils import detect_mime, validate_image, IMAGE_URL_HINTS
 
 log = logging.getLogger(__name__)
 
 SIMPLE_HEADER_MAGIC = 0xFCFB6D1BA7725C30
 SIMPLE_EOF_MAGIC_BYTES = struct.pack('<I', 0xF4FA6F45)
-
-IMAGE_SIGNATURES = {
-    b'\xff\xd8\xff':       'image/jpeg',
-    b'\x89PNG\r\n\x1a\n': 'image/png',
-    b'GIF89a':             'image/gif',
-    b'GIF87a':             'image/gif',
-    b'RIFF':               'image/webp',   # need to confirm bytes 8-12 = WEBP
-    b'<svg':               'image/svg+xml',
-}
-
-# AVIF brands (ISOBMFF ftyp box at offset 4): bytes[4:8] == b'ftyp', bytes[8:12] is the brand
-_AVIF_BRANDS = {b'avif', b'avis', b'MA1A', b'MiHA'}
-
-# Extensions that imply image content in the URL
-IMAGE_URL_HINTS = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.ico', '.svg', '.bmp', '.avif')
 
 
 @dataclass
@@ -52,34 +38,7 @@ class CachedImage:
 
 def _detect_sig(data: bytes, offset: int) -> Optional[str]:
     """Return MIME type if data at offset matches a known image signature."""
-    chunk = data[offset:]
-    for sig, mime in IMAGE_SIGNATURES.items():
-        if chunk.startswith(sig):
-            if mime == 'image/webp':
-                # Confirm WEBP fourcc at bytes 8-12
-                if len(chunk) > 12 and chunk[8:12] == b'WEBP':
-                    return mime
-            else:
-                return mime
-    # AVIF: ISOBMFF ftyp box — 4-byte size, then 'ftyp', then major brand
-    if len(chunk) >= 12 and chunk[4:8] == b'ftyp' and chunk[8:12] in _AVIF_BRANDS:
-        return 'image/avif'
-    return None
-
-
-def _validate_image(raw: bytes) -> Optional[tuple[int, int, str]]:
-    """
-    Try to open raw bytes as a PIL Image.
-    Returns (width, height, format) or None if invalid.
-    """
-    try:
-        from PIL import Image
-        img = Image.open(io.BytesIO(raw))
-        fmt = img.format or 'unknown'
-        w, h = img.size
-        return w, h, fmt
-    except Exception:
-        return None
+    return detect_mime(data[offset:])
 
 
 _HTTP_DATE_RE = re.compile(
@@ -133,9 +92,9 @@ def _extract_image(data: bytes, body_off: int) -> Optional[tuple[bytes, str, int
         chunk = data[body_off:eof_pos]
         if len(chunk) < 8:
             continue
-        result = _validate_image(chunk)
-        if result:
-            w, h, _ = result
+        dims = validate_image(chunk)
+        if dims:
+            w, h = dims
             return chunk, mime, w, h
 
     return None
@@ -185,7 +144,6 @@ def scan_cache(cache_path: str,
         day = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc).strftime('%Y-%m-%d')
         day_file_map.setdefault(day, []).append((mtime, fpath, fname))
 
-    total_files = sum(len(v) for v in day_file_map.items())  # noqa: SIM118 (compat)
     total_files = sum(len(v) for v in day_file_map.values())
     num_days = len(day_file_map)
 

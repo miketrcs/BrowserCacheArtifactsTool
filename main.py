@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-chrome-artifacts - macOS Chrome artifact browser
+chrome-artifacts - macOS browser artifact browser
 Parses: history, downloads, cookies, bookmarks
 
 Usage examples:
@@ -8,6 +8,8 @@ Usage examples:
   python main.py -i "~/Library/Application Support/Google/Chrome/Default/" -o results.db
   python main.py -i "~/Library/Application Support/Google/Chrome/Default/" --type history --limit 100
   python main.py -i "~/Library/Application Support/Google/Chrome/Default/" --type cookies --decrypt
+  python main.py --browser firefox -i "~/Library/Application Support/Firefox/Profiles/abc.default-release"
+  python main.py --browser safari -i "~/Library/Safari"
 """
 import argparse
 import logging
@@ -30,27 +32,33 @@ ALL_TYPES = ('history', 'downloads', 'cookies', 'bookmarks')
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog='chrome-artifacts',
-        description='macOS Chrome artifact browser',
+        prog='browser-artifacts',
+        description='macOS browser artifact browser — Chrome, Edge, Firefox, Safari',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
-Default Chrome profile location on macOS:
-  ~/Library/Application Support/Google/Chrome/Default/
+Default profile locations on macOS:
+  Chrome:  ~/Library/Application Support/Google/Chrome/Default/
+  Edge:    ~/Library/Application Support/Microsoft Edge/Default/
+  Firefox: ~/Library/Application Support/Firefox/Profiles/<id>.default-release/
+  Safari:  ~/Library/Safari/
         ''',
     )
     p.add_argument('-i', '--input', required=True,
-                   help='Path to Chrome profile directory')
+                   help='Path to browser profile directory (or Safari root)')
+    p.add_argument('--browser', choices=['chrome', 'edge', 'firefox', 'safari'],
+                   default='chrome',
+                   help='Browser to parse (default: chrome)')
     p.add_argument('-o', '--output',
                    help='Export to SQLite database (e.g. results.db)')
     p.add_argument('--type', dest='types', nargs='+',
                    choices=list(ALL_TYPES) + ['all'], default=['all'],
                    help='Artifact type(s) to parse (default: all)')
     p.add_argument('--decrypt', action='store_true',
-                   help='Decrypt cookie values using macOS Keychain')
+                   help='Decrypt cookie values using macOS Keychain (Chrome/Edge only)')
     p.add_argument('--limit', type=int, default=50,
                    help='Max rows to display per artifact type (default: 50)')
     p.add_argument('--no-copy', action='store_true',
-                   help="Read DB files directly (faster, but may fail if Chrome is open)")
+                   help="Read DB files directly (faster, but may fail if browser is open; Chrome/Edge only)")
     p.add_argument('-v', '--verbose', action='store_true',
                    help='Enable debug logging')
     return p
@@ -58,9 +66,9 @@ Default Chrome profile location on macOS:
 
 def banner():
     txt = Text()
-    txt.append('chrome-artifacts', style='bold green')
+    txt.append('browser-artifacts', style='bold green')
     txt.append(f'  v{__version__}', style='dim')
-    txt.append('\n  macOS Chrome artifact browser', style='white')
+    txt.append('\n  macOS browser artifact browser', style='white')
     console.print(Panel(txt, expand=False))
 
 
@@ -80,41 +88,75 @@ def main():
         sys.exit(1)
 
     types = set(ALL_TYPES if 'all' in args.types else args.types)
+    browser = args.browser.lower()
     no_copy = args.no_copy
 
-    # --- Version detection ---
+    console.print(f'[dim]Browser:[/dim] {browser}')
     console.print(f'[dim]Profile:[/dim] {profile}')
-    version = detect_version(profile, no_copy=no_copy)
-    console.print(f'[dim]Detected Chrome version range:[/dim] {version[0]}–{version[-1]}\n')
 
-    # --- Decryptor ---
-    decryptor = None
-    if args.decrypt and 'cookies' in types:
-        try:
-            from chrome_artifacts.decrypt import MacDecryptor
-            decryptor = MacDecryptor()
-            console.print('[green]Cookie decryption enabled[/green]\n')
-        except Exception as e:
-            console.print(f'[yellow]Warning: could not initialise decryptor: {e}[/yellow]\n')
-
-    # --- Parse ---
     history = downloads = cookies = bookmarks = None
 
-    if 'history' in types:
-        with console.status('Parsing history…'):
-            history = parse_history(profile, version, no_copy=no_copy)
+    if browser in ('chrome', 'edge'):
+        version = detect_version(profile, no_copy=no_copy)
+        console.print(f'[dim]Detected version range:[/dim] {version[0]}–{version[-1]}\n')
 
-    if 'downloads' in types:
-        with console.status('Parsing downloads…'):
-            downloads = parse_downloads(profile, version, no_copy=no_copy)
+        decryptor = None
+        if args.decrypt and 'cookies' in types:
+            try:
+                from chrome_artifacts.decrypt import MacDecryptor
+                decryptor = MacDecryptor(browser=browser.capitalize())
+                console.print('[green]Cookie decryption enabled[/green]\n')
+            except Exception as e:
+                console.print(f'[yellow]Warning: could not initialise decryptor: {e}[/yellow]\n')
 
-    if 'cookies' in types:
-        with console.status('Parsing cookies…'):
-            cookies = parse_cookies(profile, version, decryptor=decryptor, no_copy=no_copy)
+        if 'history' in types:
+            with console.status('Parsing history…'):
+                history = parse_history(profile, version, no_copy=no_copy)
+        if 'downloads' in types:
+            with console.status('Parsing downloads…'):
+                downloads = parse_downloads(profile, version, no_copy=no_copy)
+        if 'cookies' in types:
+            with console.status('Parsing cookies…'):
+                cookies = parse_cookies(profile, version, decryptor=decryptor, no_copy=no_copy)
+        if 'bookmarks' in types:
+            with console.status('Parsing bookmarks…'):
+                bookmarks = parse_bookmarks(profile, version)
 
-    if 'bookmarks' in types:
-        with console.status('Parsing bookmarks…'):
-            bookmarks = parse_bookmarks(profile, version)
+    elif browser == 'firefox':
+        from chrome_artifacts.firefox_parsers import (
+            parse_firefox_history, parse_firefox_downloads,
+            parse_firefox_cookies, parse_firefox_bookmarks,
+        )
+        if 'history' in types:
+            with console.status('Parsing Firefox history…'):
+                history = parse_firefox_history(profile)
+        if 'downloads' in types:
+            with console.status('Parsing Firefox downloads…'):
+                downloads = parse_firefox_downloads(profile)
+        if 'cookies' in types:
+            with console.status('Parsing Firefox cookies…'):
+                cookies = parse_firefox_cookies(profile)
+        if 'bookmarks' in types:
+            with console.status('Parsing Firefox bookmarks…'):
+                bookmarks = parse_firefox_bookmarks(profile)
+
+    elif browser == 'safari':
+        from chrome_artifacts.safari_parsers import (
+            parse_safari_history, parse_safari_downloads,
+            parse_safari_cookies, parse_safari_bookmarks,
+        )
+        if 'history' in types:
+            with console.status('Parsing Safari history…'):
+                history = parse_safari_history(profile)
+        if 'downloads' in types:
+            with console.status('Parsing Safari downloads…'):
+                downloads = parse_safari_downloads(profile)
+        if 'cookies' in types:
+            with console.status('Parsing Safari cookies…'):
+                cookies = parse_safari_cookies(profile)
+        if 'bookmarks' in types:
+            with console.status('Parsing Safari bookmarks…'):
+                bookmarks = parse_safari_bookmarks(profile)
 
     # --- Display ---
     if history:

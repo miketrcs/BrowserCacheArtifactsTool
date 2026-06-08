@@ -1,8 +1,10 @@
 """
 BrowserCacheArtifactsTool — Streamlit GUI
-Supports Chrome and Safari on macOS.
+Supports Chrome, Edge, Firefox, and Safari on macOS.
 """
 import datetime
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -41,8 +43,6 @@ st.set_page_config(
     initial_sidebar_state='expanded',
 )
 
-import os
-import subprocess
 _home = Path(os.environ.get('REAL_HOME', str(Path.home())))
 DEFAULT_CHROME_PROFILE   = str(_home / 'Library/Application Support/Google/Chrome/Default')
 DEFAULT_EDGE_PROFILE     = str(_home / 'Library/Application Support/Microsoft Edge/Default')
@@ -200,8 +200,7 @@ for key in ('history', 'downloads', 'cookies', 'bookmarks', 'images', 'version',
     if key not in st.session_state:
         st.session_state[key] = None
 
-if 'loaded' not in st.session_state:
-    st.session_state.loaded = False
+st.session_state.setdefault('loaded', False)
 
 
 # ---------------------------------------------------------------------------
@@ -241,8 +240,6 @@ if load_btn:
 
             with st.spinner('Scanning cache for images… (this may take a moment)'):
                 cache_dir = default_cache_path(profile)
-                # scan_limit=30000 covers the most recent ~30k entries fast;
-                # max_results=0 returns everything found (display capped by "Show" control)
                 st.session_state.images = scan_cache(cache_dir, max_results=0, scan_limit=30000)
 
         elif browser == 'Firefox':
@@ -258,17 +255,13 @@ if load_btn:
             with st.spinner('Parsing Firefox bookmarks…'):
                 st.session_state.bookmarks = parse_firefox_bookmarks(profile)
             with st.spinner('Scanning Firefox cache for images…'):
-                st.session_state.images = scan_firefox_cache(profile, max_results=500)
+                st.session_state.images = scan_firefox_cache(profile, max_results=0, scan_limit=30000)
 
         else:  # Safari
             st.session_state.version = ['Safari']
 
-            # Quick permission check before parsing
             _safari_perm_ok = _check_safari_permissions(profile)
-            if not _safari_perm_ok:
-                st.session_state.perm_error = True
-            else:
-                st.session_state.perm_error = False
+            st.session_state.perm_error = not _safari_perm_ok
 
             with st.spinner('Parsing Safari history…'):
                 st.session_state.history = parse_safari_history(profile)
@@ -279,7 +272,7 @@ if load_btn:
             with st.spinner('Parsing Safari bookmarks…'):
                 st.session_state.bookmarks = parse_safari_bookmarks(profile)
             with st.spinner('Scanning Safari cache for images…'):
-                st.session_state.images = scan_safari_cache(profile, max_results=500)
+                st.session_state.images = scan_safari_cache(profile, max_results=0)
 
         st.session_state.loaded = True
         st.success('Profile loaded.')
@@ -313,6 +306,8 @@ if not st.session_state.loaded:
         '**Default locations on macOS:**\n'
         '```\n'
         'Chrome:  ~/Library/Application Support/Google/Chrome/Default\n'
+        'Edge:    ~/Library/Application Support/Microsoft Edge/Default\n'
+        'Firefox: ~/Library/Application Support/Firefox/Profiles/<id>.default-release\n'
         'Safari:  ~/Library/Safari\n'
         '```'
     )
@@ -370,12 +365,21 @@ with tab_hist:
     if df.empty:
         st.info('No history found.')
     else:
-        col1, col2 = st.columns([3, 1])
-        with col1:
+        row1 = st.columns([3, 1])
+        row2 = st.columns([1, 1, 1])
+
+        with row1[0]:
             search = st.text_input('Search URL or title', key='hist_search', placeholder='Filter…')
-        with col2:
+        with row1[1]:
             transitions = ['All'] + sorted(df['Transition'].unique().tolist())
             trans_filter = st.selectbox('Transition', transitions, key='hist_trans')
+
+        with row2[0]:
+            date_from = st.date_input('From date', value=None, key='hist_date_from')
+        with row2[1]:
+            date_to = st.date_input('To date', value=None, key='hist_date_to')
+        with row2[2]:
+            typed_only = st.checkbox('Typed URLs only', key='hist_typed')
 
         if search:
             mask = (df['URL'].str.contains(search, case=False, na=False) |
@@ -383,6 +387,12 @@ with tab_hist:
             df = df[mask]
         if trans_filter != 'All':
             df = df[df['Transition'] == trans_filter]
+        if date_from:
+            df = df[df['Visited'] >= str(date_from)]
+        if date_to:
+            df = df[df['Visited'] <= str(date_to) + ' 23:59:59']
+        if typed_only:
+            df = df[df['Typed'] > 0]
 
         st.caption(f'{len(df):,} records')
         st.dataframe(df, width="stretch", height=500,
@@ -399,12 +409,15 @@ with tab_dl:
     if df.empty:
         st.info('No downloads found.')
     else:
-        col1, col2 = st.columns([3, 1])
+        col1, col2, col3 = st.columns([3, 1, 1])
         with col1:
             search = st.text_input('Search URL or path', key='dl_search', placeholder='Filter…')
         with col2:
             states = ['All'] + sorted(df['State'].unique().tolist())
             state_filter = st.selectbox('State', states, key='dl_state')
+        with col3:
+            dangerous_only = st.checkbox('Dangerous only', key='dl_danger',
+                                         help='Files flagged as dangerous (danger_type > 0)')
 
         if search:
             mask = (df['URL'].str.contains(search, case=False, na=False) |
@@ -412,6 +425,8 @@ with tab_dl:
             df = df[mask]
         if state_filter != 'All':
             df = df[df['State'] == state_filter]
+        if dangerous_only:
+            df = df[df['Danger'].apply(lambda v: v not in ('', '0', 'safe', 'None'))]
 
         st.caption(f'{len(df):,} records')
         st.dataframe(df, width="stretch", height=500,
@@ -429,13 +444,15 @@ with tab_cook:
     if df.empty:
         st.info('No cookies found.')
     else:
-        col1, col2, col3 = st.columns([3, 1, 1])
+        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
         with col1:
             search = st.text_input('Search host or name', key='cook_search', placeholder='Filter…')
         with col2:
             secure_only = st.checkbox('Secure only', key='cook_secure')
         with col3:
             persistent_only = st.checkbox('Persistent only', key='cook_persist')
+        with col4:
+            hide_expired = st.checkbox('Hide expired', key='cook_hide_expired')
 
         if search:
             mask = (df['Host'].str.contains(search, case=False, na=False) |
@@ -445,6 +462,9 @@ with tab_cook:
             df = df[df['Secure']]
         if persistent_only:
             df = df[df['Persistent']]
+        if hide_expired:
+            now_str = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            df = df[(df['Expires'] == '') | (df['Expires'] > now_str)]
 
         st.caption(f'{len(df):,} records')
         st.dataframe(df, width="stretch", height=500)
@@ -484,23 +504,27 @@ with tab_bm:
 with tab_img:
     images = st.session_state.images or []
 
-    col1, col2, col3, col4, col5, col6 = st.columns([3, 1, 1, 1, 1, 1])
-    with col1:
+    row1 = st.columns([3, 1, 1, 1, 1, 1, 1])
+    row2 = st.columns([1, 1, 1, 1, 5])
+
+    with row1[0]:
         img_search = st.text_input('Filter by URL', key='img_search', placeholder='e.g. amazon, youtube…')
-    with col2:
+    with row1[1]:
         mime_types = ['All'] + sorted({i.mime_type for i in images})
         mime_filter = st.selectbox('Type', mime_types, key='img_mime')
-    with col3:
+    with row1[2]:
         min_w = st.number_input('Min width px', min_value=0, value=0, step=10, key='img_minw')
-    with col4:
+    with row1[3]:
+        min_h = st.number_input('Min height px', min_value=0, value=0, step=10, key='img_minh')
+    with row1[4]:
         dates = sorted(
             {i.cached_at.strftime('%Y-%m-%d') for i in images if getattr(i, 'cached_at', None)},
             reverse=True,
         )
         date_filter = st.selectbox('Cached date', ['All'] + dates, key='img_date')
-    with col5:
+    with row1[5]:
         show_limit = st.selectbox('Show', [200, 500, 1000, 2000, 'All'], index=0, key='img_limit')
-    with col6:
+    with row1[6]:
         cols_per_row = st.selectbox('Columns', [2, 3, 4, 5, 6], index=2, key='img_cols')
 
     # Apply filters
@@ -511,6 +535,8 @@ with tab_img:
         filtered_imgs = [i for i in filtered_imgs if i.mime_type == mime_filter]
     if min_w > 0:
         filtered_imgs = [i for i in filtered_imgs if i.width >= min_w]
+    if min_h > 0:
+        filtered_imgs = [i for i in filtered_imgs if i.height >= min_h]
     if date_filter != 'All':
         filtered_imgs = [i for i in filtered_imgs
                          if getattr(i, 'cached_at', None)
@@ -538,4 +564,12 @@ with tab_img:
                         f'[{label}]({img.url})  \n'
                         f'{img.width}×{img.height} · {img.size_bytes:,}B · {img.mime_type.split("/")[-1]}'
                         + (f'  \n{date_str}' if date_str else '')
+                    )
+                    st.download_button(
+                        label='Save',
+                        data=img.data,
+                        file_name=label or 'image',
+                        mime=img.mime_type,
+                        key=f'dl_{getattr(img, "filename", "")}_{img.url[:40]}',
+                        use_container_width=True,
                     )

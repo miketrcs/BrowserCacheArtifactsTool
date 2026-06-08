@@ -14,7 +14,6 @@ URL is extracted via regex scan rather than fixed field offsets — this works
 across all versions observed in testing (Firefox 100+).
 """
 import datetime
-import io
 import logging
 import os
 import re
@@ -23,25 +22,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from .cache_utils import detect_mime, validate_image, IMAGE_URL_HINTS
+
 log = logging.getLogger(__name__)
-
-IMAGE_SIGNATURES = {
-    b'\xff\xd8\xff':       'image/jpeg',
-    b'\x89PNG\r\n\x1a\n': 'image/png',
-    b'GIF89a':             'image/gif',
-    b'GIF87a':             'image/gif',
-    b'RIFF':               'image/webp',
-    b'<svg':               'image/svg+xml',
-}
-
-_AVIF_BRANDS = {b'avif', b'avis', b'MA1A', b'MiHA'}
 
 # Matches http(s) URLs in the metadata section; handles Firefox's
 # partition-key prefix formats ("a,https://..." or "~site~https://...").
 _URL_RE = re.compile(rb'https?://[^\x00\n\r ]{8,}')
-
-IMAGE_URL_HINTS = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.ico', '.svg',
-                   '.bmp', '.avif')
 
 
 @dataclass
@@ -53,28 +40,6 @@ class FirefoxCachedImage:
     size_bytes: int
     data: bytes
     cached_at: Optional[datetime.datetime] = None
-
-
-def _detect_mime(data: bytes) -> Optional[str]:
-    for sig, mime in IMAGE_SIGNATURES.items():
-        if data.startswith(sig):
-            if mime == 'image/webp':
-                if len(data) > 12 and data[8:12] == b'WEBP':
-                    return mime
-            else:
-                return mime
-    if len(data) >= 12 and data[4:8] == b'ftyp' and data[8:12] in _AVIF_BRANDS:
-        return 'image/avif'
-    return None
-
-
-def _validate_image(raw: bytes) -> Optional[tuple[int, int]]:
-    try:
-        from PIL import Image
-        img = Image.open(io.BytesIO(raw))
-        return img.size
-    except Exception:
-        return None
 
 
 def _parse_entry(data: bytes) -> Optional[tuple[bytes, str]]:
@@ -110,7 +75,8 @@ def scan_firefox_cache(profile_path: str,
                        url_filter: str = '',
                        min_width: int = 0,
                        min_height: int = 0,
-                       max_results: int = 500) -> list[FirefoxCachedImage]:
+                       max_results: int = 0,
+                       scan_limit: int = 30000) -> list[FirefoxCachedImage]:
     """
     Scan Firefox's cache2 directory for cached images.
 
@@ -119,6 +85,10 @@ def scan_firefox_cache(profile_path: str,
 
     If that exact path doesn't exist (e.g. profile was renamed), falls back
     to the most recently modified Firefox cache directory.
+
+    Uses the same day-bucketing strategy as Chrome's scan_cache: stat all
+    files first (no reads), distribute scan_limit evenly across days so
+    results cover the full date range, then read + validate.
     """
     real_home = Path(os.environ.get('REAL_HOME', str(Path.home())))
     profile_name = Path(profile_path).name
@@ -143,13 +113,36 @@ def scan_firefox_cache(profile_path: str,
         return []
 
     log.info(f'Scanning Firefox cache: {cache_dir}')
-    results: list[FirefoxCachedImage] = []
 
+    # Phase 1: stat all files, bucket by day
+    day_file_map: dict[str, list[tuple[float, Path]]] = {}
     for entry_path in cache_dir.iterdir():
         if not entry_path.is_file():
             continue
         try:
-            fstat = entry_path.stat()
+            mtime = entry_path.stat().st_mtime
+        except OSError:
+            continue
+        day = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc).strftime('%Y-%m-%d')
+        day_file_map.setdefault(day, []).append((mtime, entry_path))
+
+    total_files = sum(len(v) for v in day_file_map.values())
+    num_days = len(day_file_map)
+    per_day_scan = max(50, (scan_limit // num_days) if (scan_limit and num_days) else 500)
+
+    selected: list[tuple[float, Path]] = []
+    for day_files in day_file_map.values():
+        day_files.sort(key=lambda x: x[0], reverse=True)
+        selected.extend(day_files[:per_day_scan])
+
+    log.info(f'Cache stat pass: {total_files} files across {num_days} days; '
+             f'reading {len(selected)} ({per_day_scan}/day)')
+
+    # Phase 2: read + validate
+    buckets: dict[str, list[FirefoxCachedImage]] = {}
+
+    for mtime, entry_path in selected:
+        try:
             data = entry_path.read_bytes()
         except OSError:
             continue
@@ -164,24 +157,32 @@ def scan_firefox_cache(profile_path: str,
         if url_filter and url_filter.lower() not in url.lower():
             continue
 
-        mime = _detect_mime(body)
+        mime = detect_mime(body)
         if mime is None:
             continue
 
-        dims = _validate_image(body)
+        dims = validate_image(body)
         if dims is None:
             continue
         w, h = dims
         if (min_width and w < min_width) or (min_height and h < min_height):
             continue
 
-        cached_at = datetime.datetime.fromtimestamp(fstat.st_mtime, datetime.timezone.utc)
-        results.append(FirefoxCachedImage(
+        cached_at = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc)
+        day = cached_at.strftime('%Y-%m-%d')
+        buckets.setdefault(day, []).append(FirefoxCachedImage(
             url=url, mime_type=mime, width=w, height=h,
             size_bytes=len(body), data=body, cached_at=cached_at,
         ))
 
-    _epoch = datetime.datetime.fromtimestamp(0, datetime.timezone.utc)
-    results.sort(key=lambda x: (x.cached_at or _epoch, x.size_bytes), reverse=True)
-    log.info(f'Found {len(results)} Firefox cached images')
-    return results[:max_results]
+    if not buckets:
+        return []
+
+    all_results: list[FirefoxCachedImage] = []
+    for day in sorted(buckets.keys(), reverse=True):
+        all_results.extend(sorted(buckets[day], key=lambda x: x.size_bytes, reverse=True))
+
+    returned = all_results[:max_results] if max_results else all_results
+    log.info(f'  → {len(all_results)} images across {len(buckets)} days, '
+             f'returning {len(returned)}')
+    return returned

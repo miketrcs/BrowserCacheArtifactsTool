@@ -1,6 +1,6 @@
 # BrowserCacheArtifactsTool
 
-A macOS-focused browser artifact browser with a Streamlit GUI. Browse history, downloads, cookies, bookmarks, and cached images from **Chrome** and **Safari** — entirely local, no data ever leaves your machine.
+A macOS-focused browser artifact browser with a Streamlit GUI. Browse history, downloads, cookies, bookmarks, and cached images from **Chrome**, **Edge**, **Firefox**, and **Safari** — entirely local, no data ever leaves your machine.
 
 ![Python](https://img.shields.io/badge/python-3.13-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
@@ -10,14 +10,14 @@ A macOS-focused browser artifact browser with a Streamlit GUI. Browse history, d
 
 ## Features
 
-| | Chrome | Edge | Safari |
-|---|---|---|---|
-| History | ✅ | ✅ | ✅ |
-| Downloads | ✅ | ✅ | ✅ |
-| Cookies | ✅ (with optional decryption) | ✅ (with optional decryption) | ✅ |
-| Bookmarks | ✅ | ✅ | ✅ |
-| Cached Images | ✅ Simple Cache | ✅ Simple Cache | ✅ WebKitCache + Cache.db |
-| SQLite Export | ✅ | ✅ | ✅ |
+| | Chrome | Edge | Firefox | Safari |
+|---|---|---|---|---|
+| History | ✅ | ✅ | ✅ | ✅ |
+| Downloads | ✅ | ✅ | ✅ | ✅ |
+| Cookies | ✅ (with optional decryption) | ✅ (with optional decryption) | ✅ | ✅ |
+| Bookmarks | ✅ | ✅ | ✅ | ✅ |
+| Cached Images | ✅ Simple Cache | ✅ Simple Cache | ✅ cache2 | ✅ WebKitCache + Cache.db |
+| SQLite Export | ✅ | ✅ | ✅ | ✅ |
 
 - **Fully local** — runs on `localhost`, no telemetry, no cloud, no data leaves your machine
 - **Zero footprint USB mode** — run from a USB key without writing anything to the target Mac
@@ -129,25 +129,35 @@ Open your browser to `http://localhost:8502` after launching `run.sh`.
 ```
 Chrome:  ~/Library/Application Support/Google/Chrome/Default
 Edge:    ~/Library/Application Support/Microsoft Edge/Default
+Firefox: ~/Library/Application Support/Firefox/Profiles/<id>.default-release
 Safari:  ~/Library/Safari
 ```
 
 ### CLI
 
 ```bash
-# View all artifact types
+# Chrome (default)
 python main.py -i "~/Library/Application Support/Google/Chrome/Default/"
+
+# Edge
+python main.py --browser edge -i "~/Library/Application Support/Microsoft Edge/Default/"
+
+# Firefox
+python main.py --browser firefox -i "~/Library/Application Support/Firefox/Profiles/<id>.default-release"
+
+# Safari
+python main.py --browser safari -i "~/Library/Safari"
 
 # Export to SQLite
 python main.py -i "..." -o results.db
 
-# Specific artifact types with limit
+# Specific artifact types with row limit
 python main.py -i "..." --type history downloads --limit 100
 
-# Decrypt Chrome cookie values (reads from macOS Keychain)
+# Decrypt Chrome/Edge cookie values (reads from macOS Keychain)
 python main.py -i "..." --type cookies --decrypt
 
-# Read files directly without copying (faster, requires Chrome to be closed)
+# Read files directly without copying (faster, requires browser to be closed; Chrome/Edge only)
 python main.py -i "..." --no-copy
 ```
 
@@ -157,7 +167,7 @@ python main.py -i "..." --no-copy
 
 ```
 BrowserCacheArtifactsTool/
-├── app.py                        # Streamlit GUI (Chrome + Safari)
+├── app.py                        # Streamlit GUI (Chrome, Edge, Firefox, Safari)
 ├── main.py                       # CLI entry point
 ├── run.sh                        # Portable launcher (USB + local)
 ├── build_usb.sh                  # Installer (USB or local folder)
@@ -167,10 +177,13 @@ BrowserCacheArtifactsTool/
 └── chrome_artifacts/
     ├── artifacts.py              # Shared data classes (URLItem, DownloadItem, …)
     ├── cache.py                  # Chrome Simple Cache image extractor
+    ├── cache_utils.py            # Shared image-detection helpers (MIME, PIL validation)
     ├── db.py                     # SQLite connection helpers
     ├── decrypt.py                # macOS Keychain AES-CBC cookie decryption
+    ├── firefox_cache.py          # Firefox cache2 image extractor
+    ├── firefox_parsers.py        # Firefox history, downloads, cookies, bookmarks
     ├── output.py                 # Rich terminal tables + SQLite export
-    ├── parsers.py                # Chrome history, downloads, cookies, bookmarks
+    ├── parsers.py                # Chrome/Edge history, downloads, cookies, bookmarks
     ├── safari_cache.py           # Safari WebKitCache + Cache.db image extractor
     └── safari_parsers.py         # Safari history, downloads, cookies, bookmarks
 ```

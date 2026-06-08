@@ -19,7 +19,6 @@ Strategy:
   • Also scan Cache.db (inline + fsCachedData) as before.
 """
 import datetime
-import io
 import logging
 import os
 import shutil
@@ -30,20 +29,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from .cache_utils import detect_mime, validate_image, IMAGE_URL_HINTS
+
 log = logging.getLogger(__name__)
-
-IMAGE_SIGNATURES = {
-    b'\xff\xd8\xff':       'image/jpeg',
-    b'\x89PNG\r\n\x1a\n': 'image/png',
-    b'GIF89a':             'image/gif',
-    b'GIF87a':             'image/gif',
-    b'RIFF':               'image/webp',
-    b'<svg':               'image/svg+xml',
-}
-
-_AVIF_BRANDS = {b'avif', b'avis', b'MA1A', b'MiHA'}
-
-IMAGE_URL_HINTS = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.ico', '.svg', '.bmp', '.avif')
 
 
 @dataclass
@@ -60,29 +48,6 @@ class SafariCachedImage:
 # ---------------------------------------------------------------------------
 # Image helpers
 # ---------------------------------------------------------------------------
-
-def _detect_mime(data: bytes) -> Optional[str]:
-    for sig, mime in IMAGE_SIGNATURES.items():
-        if data.startswith(sig):
-            if mime == 'image/webp':
-                if len(data) > 12 and data[8:12] == b'WEBP':
-                    return mime
-            else:
-                return mime
-    # AVIF: ISOBMFF ftyp box — 4-byte size, then 'ftyp', then major brand
-    if len(data) >= 12 and data[4:8] == b'ftyp' and data[8:12] in _AVIF_BRANDS:
-        return 'image/avif'
-    return None
-
-
-def _validate_image(raw: bytes) -> Optional[tuple[int, int]]:
-    try:
-        from PIL import Image
-        img = Image.open(io.BytesIO(raw))
-        return img.size  # (width, height)
-    except Exception:
-        return None
-
 
 # ---------------------------------------------------------------------------
 # Cache.db helpers
@@ -104,6 +69,7 @@ def _open_cache_db(path: str) -> Optional[sqlite3.Connection]:
         return conn
     except Exception as e:
         log.error(f'Could not open Safari Cache.db: {e}')
+        shutil.rmtree(tmp, ignore_errors=True)
         return None
 
 
@@ -153,10 +119,10 @@ def _scan_cache_db(cache_base: Path, url_filter: str,
             blob = _read_blob(row, fs_data_dir)
             if not blob or len(blob) < 8:
                 continue
-            mime = _detect_mime(blob)
+            mime = detect_mime(blob)
             if mime is None:
                 continue
-            dims = _validate_image(blob)
+            dims = validate_image(blob)
             if dims is None:
                 continue
             w, h = dims
@@ -303,7 +269,7 @@ def _scan_webkit_cache(webkit_cache: Path, url_filter: str,
         except OSError:
             continue
 
-        mime = _detect_mime(data)
+        mime = detect_mime(data)
         if mime is None:
             continue
 
@@ -313,7 +279,7 @@ def _scan_webkit_cache(webkit_cache: Path, url_filter: str,
             if url:
                 continue
 
-        dims = _validate_image(data)
+        dims = validate_image(data)
         if dims is None:
             continue
 
