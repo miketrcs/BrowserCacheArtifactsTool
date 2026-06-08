@@ -338,8 +338,9 @@ def scan_safari_cache(safari_root: str,
 
     _epoch = datetime.datetime.fromtimestamp(0, datetime.timezone.utc)
     results.sort(key=lambda x: (x.cached_at or _epoch, x.size_bytes), reverse=True)
-    log.info(f'Found {len(results)} Safari cached images total')
-    return results[:max_results]
+    returned = results[:max_results] if max_results else results
+    log.info(f'Found {len(results)} Safari cached images total, returning {len(returned)}')
+    return returned
 
 
 def default_safari_cache_path(safari_root: str) -> str:
