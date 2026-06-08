@@ -245,7 +245,12 @@ def _scan_webkit_cache(webkit_cache: Path, url_filter: str,
     """Scan WebKitCache/Version N/Blobs/ for cached images."""
     # Find the latest version directory
     version_dir = None
-    for child in sorted(webkit_cache.iterdir(), reverse=True):
+    try:
+        children = sorted(webkit_cache.iterdir(), reverse=True)
+    except PermissionError:
+        log.warning(f'Permission denied reading WebKitCache: {webkit_cache}')
+        return []
+    for child in children:
         if child.name.startswith('Version') and child.is_dir():
             version_dir = child
             break

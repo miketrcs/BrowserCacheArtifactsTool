@@ -277,8 +277,17 @@ if load_btn:
                 st.session_state.images = scan_firefox_cache(profile, max_results=0, scan_limit=30000)
 
         else:  # Safari
-            # Probe permissions — the read attempt triggers the macOS dialog if needed
-            if not _probe_permissions(Path(profile) / 'History.db'):
+            # Probe both the Safari root and the sandboxed container (WebKitCache / cookies).
+            # Each read attempt triggers the macOS TCC dialog for its respective location.
+            _safari_container = (
+                _home / 'Library/Containers/com.apple.Safari/Data/Library/Caches/com.apple.Safari'
+            )
+            _safari_cookie_path = (
+                _home / 'Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies'
+            )
+            if (not _probe_permissions(Path(profile) / 'History.db') or
+                    not _probe_permissions(_safari_cookie_path) or
+                    not _probe_permissions(_safari_container / 'Cache.db')):
                 st.session_state.perm_error = 'Safari'
                 st.session_state.loaded = True
                 st.rerun()
