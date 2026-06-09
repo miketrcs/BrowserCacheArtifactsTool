@@ -131,7 +131,6 @@ def cookies_to_df(items) -> pd.DataFrame:
 
 
 def bookmarks_to_df(items) -> pd.DataFrame:
-    from chrome_artifacts.artifacts import BookmarkItem
     return pd.DataFrame([{
         'Added':   fmt_dt(i.date_added),
         'Name':    i.name or '',
@@ -202,7 +201,7 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Session state
 # ---------------------------------------------------------------------------
-for key in ('history', 'downloads', 'cookies', 'bookmarks', 'images', 'version', 'loaded', 'browser', 'perm_error'):
+for key in ('history', 'downloads', 'cookies', 'bookmarks', 'images', 'version', 'loaded', 'browser', 'perm_error', 'profile'):
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -219,6 +218,7 @@ if load_btn:
         st.error(f'Directory not found: `{profile}`')
     else:
         st.session_state.browser = browser
+        st.session_state.profile = profile
 
         if browser in ('Chrome', 'Edge'):
             # Probe permissions — the read attempt triggers the macOS dialog if needed
@@ -228,8 +228,7 @@ if load_btn:
                 st.rerun()
 
             st.session_state.perm_error = False
-            browser_label = browser
-            with st.spinner(f'Detecting {browser_label} version…'):
+            with st.spinner(f'Detecting {browser} version…'):
                 version = detect_version(profile, no_copy=no_copy)
             st.session_state.version = version
 
@@ -237,7 +236,7 @@ if load_btn:
             if decrypt:
                 try:
                     from chrome_artifacts.decrypt import MacDecryptor
-                    decryptor = MacDecryptor(browser=browser_label)
+                    decryptor = MacDecryptor(browser=browser)
                 except Exception as e:
                     st.warning(f'Could not initialise decryptor: {e}')
 
@@ -393,7 +392,7 @@ elif active_browser == 'Firefox':
 else:
     version_str = active_browser
 
-st.caption(f'{version_str}  ·  Profile: `{profile_path}`')
+st.caption(f'{version_str}  ·  Profile: `{st.session_state.profile or profile_path}`')
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric('History',       f'{len(st.session_state.history or []):,}')
@@ -514,7 +513,7 @@ with tab_cook:
         if persistent_only:
             df = df[df['Persistent']]
         if hide_expired:
-            now_str = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            now_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             df = df[(df['Expires'] == '') | (df['Expires'] > now_str)]
 
         st.caption(f'{len(df):,} records')
@@ -603,7 +602,7 @@ with tab_img:
         for row_start in range(0, len(display_imgs), cols_per_row):
             row_imgs = display_imgs[row_start:row_start + cols_per_row]
             cols = st.columns(cols_per_row)
-            for col, img in zip(cols, row_imgs):
+            for grid_idx, (col, img) in enumerate(zip(cols, row_imgs), start=row_start):
                 with col:
                     try:
                         st.image(img.data, width='stretch')
@@ -621,6 +620,6 @@ with tab_img:
                         data=img.data,
                         file_name=label or 'image',
                         mime=img.mime_type,
-                        key=f'dl_{getattr(img, "filename", "")}_{img.url[:40]}',
-                        use_container_width=True,
+                        key=f'dl_{grid_idx}_{getattr(img, "filename", "")}_{img.url[:40]}',
+                        width='stretch',
                     )

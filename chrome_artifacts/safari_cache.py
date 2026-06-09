@@ -21,15 +21,14 @@ Strategy:
 import datetime
 import logging
 import os
-import shutil
 import sqlite3
 import struct
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from .cache_utils import detect_mime, validate_image, IMAGE_URL_HINTS
+from .db import open_db_copy
 
 log = logging.getLogger(__name__)
 
@@ -46,31 +45,12 @@ class SafariCachedImage:
 
 
 # ---------------------------------------------------------------------------
-# Image helpers
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # Cache.db helpers
 # ---------------------------------------------------------------------------
 
 def _open_cache_db(path: str) -> Optional[sqlite3.Connection]:
-    if not os.path.exists(path):
-        log.warning(f'Safari Cache.db not found: {path}')
-        return None
-    tmp = tempfile.mkdtemp(prefix='bcat_safari_cache_')
-    dst = os.path.join(tmp, 'Cache.db')
-    try:
-        for suffix in ('', '-wal', '-shm'):
-            src = path + suffix
-            if os.path.exists(src):
-                shutil.copyfile(src, dst + suffix)
-        conn = sqlite3.connect(dst)
-        conn.row_factory = sqlite3.Row
-        return conn
-    except Exception as e:
-        log.error(f'Could not open Safari Cache.db: {e}')
-        shutil.rmtree(tmp, ignore_errors=True)
-        return None
+    """Copy Cache.db (and any WAL files) to a temp dir then open it."""
+    return open_db_copy(path, prefix='bcat_safari_cache_')
 
 
 def _read_blob(row, fs_data_dir: Path) -> Optional[bytes]:

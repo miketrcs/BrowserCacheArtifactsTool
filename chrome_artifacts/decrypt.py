@@ -25,9 +25,11 @@ def _aes_decrypt(data: bytes, key: bytes) -> bytes:
     from Cryptodome.Cipher import AES
     cipher = AES.new(key, AES.MODE_CBC, IV=_IV)
     decrypted = cipher.decrypt(data)
-    # Remove PKCS7 padding
+    # Remove PKCS7 padding (a valid pad byte is 1–16 for AES)
     pad_len = decrypted[-1]
-    return decrypted[:-pad_len]
+    if 1 <= pad_len <= 16:
+        return decrypted[:-pad_len]
+    return decrypted
 
 
 _KEYCHAIN_SERVICES = {
@@ -67,8 +69,9 @@ class MacDecryptor:
         """
         Decrypt a Chrome-encrypted cookie/credential value.
 
-        Returns the plaintext string, or None if decryption fails or the
-        value is not encrypted (no v10 prefix).
+        Returns the plaintext string. Non-encrypted values (no v10/v11
+        prefix) are returned as-is if they decode as text, else None.
+        Returns '<encrypted>' if AES decryption fails.
         """
         if not encrypted_value or len(encrypted_value) < 3:
             return None

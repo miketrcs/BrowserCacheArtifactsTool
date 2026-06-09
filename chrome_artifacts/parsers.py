@@ -125,15 +125,10 @@ def detect_version(profile_path: str, no_copy: bool = False, temp_dir: str = Non
 # History
 # ---------------------------------------------------------------------------
 
+# Keyed by the minimum Chrome version each query supports; _resolve_query
+# picks the highest key <= the detected version. The columns we read are
+# unchanged from v59 through v150, so one query covers that whole range.
 _HISTORY_QUERIES = {
-    107: '''SELECT urls.url, urls.title, urls.visit_count, urls.typed_count,
-                   urls.last_visit_time, urls.hidden,
-                   visits.visit_time, visits.from_visit, visits.visit_duration,
-                   visits.transition, visit_source.source
-            FROM urls
-            JOIN visits ON urls.id = visits.url
-            LEFT JOIN visit_source ON visits.id = visit_source.id''',
-
     59:  '''SELECT urls.url, urls.title, urls.visit_count, urls.typed_count,
                    urls.last_visit_time, urls.hidden,
                    visits.visit_time, visits.from_visit, visits.visit_duration,
@@ -221,14 +216,8 @@ def parse_history(profile_path: str, version: list[int],
 # Downloads
 # ---------------------------------------------------------------------------
 
+# The columns we read are unchanged from v30 through v150.
 _DOWNLOAD_QUERIES = {
-    58: '''SELECT downloads.id, downloads_url_chains.url, downloads.target_path,
-                  downloads.start_time, downloads.end_time, downloads.received_bytes,
-                  downloads.total_bytes, downloads.state, downloads.danger_type,
-                  downloads.interrupt_reason, downloads.opened
-           FROM downloads
-           JOIN downloads_url_chains ON downloads.id = downloads_url_chains.id''',
-
     30: '''SELECT downloads.id, downloads_url_chains.url, downloads.target_path,
                   downloads.start_time, downloads.end_time, downloads.received_bytes,
                   downloads.total_bytes, downloads.state, downloads.danger_type,

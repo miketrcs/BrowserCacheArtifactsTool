@@ -38,7 +38,7 @@ class CachedImage:
 
 def _detect_sig(data: bytes, offset: int) -> Optional[str]:
     """Return MIME type if data at offset matches a known image signature."""
-    return detect_mime(data[offset:])
+    return detect_mime(data[offset:offset + 16])
 
 
 _HTTP_DATE_RE = re.compile(
@@ -152,7 +152,6 @@ def scan_cache(cache_path: str,
 
     selected: list[tuple[float, Path, str]] = []
     for day_files in day_file_map.values():
-        # Within each day, prefer largest files (they're more likely to be real images)
         day_files.sort(key=lambda x: x[0], reverse=True)  # newest-within-day first
         selected.extend(day_files[:per_day_scan])
 

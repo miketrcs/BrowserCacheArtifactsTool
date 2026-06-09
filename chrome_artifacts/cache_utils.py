@@ -4,13 +4,14 @@ Shared image-detection helpers used by Chrome, Firefox, and Safari cache scanner
 import io
 from typing import Optional
 
+# SVG is intentionally absent: every candidate must also pass PIL validation,
+# which cannot open SVGs, so they could never be displayed anyway.
 IMAGE_SIGNATURES = {
     b'\xff\xd8\xff':       'image/jpeg',
     b'\x89PNG\r\n\x1a\n': 'image/png',
     b'GIF89a':             'image/gif',
     b'GIF87a':             'image/gif',
     b'RIFF':               'image/webp',
-    b'<svg':               'image/svg+xml',
 }
 
 _AVIF_BRANDS = {b'avif', b'avis', b'MA1A', b'MiHA'}

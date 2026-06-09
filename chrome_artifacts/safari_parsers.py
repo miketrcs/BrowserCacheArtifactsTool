@@ -13,13 +13,12 @@ import datetime
 import logging
 import os
 import plistlib
-import shutil
 import sqlite3
 import struct
-import tempfile
 from pathlib import Path
 
 from .artifacts import URLItem, DownloadItem, CookieItem, BookmarkItem, BookmarkFolderItem
+from .db import open_db_copy
 
 log = logging.getLogger(__name__)
 
@@ -40,24 +39,7 @@ def _mac_to_dt(ts) -> datetime.datetime:
 
 def _open_db(path: str) -> sqlite3.Connection | None:
     """Open a Safari SQLite DB (copies WAL files alongside)."""
-    if not os.path.exists(path):
-        log.warning(f'Not found: {path}')
-        return None
-    tmp = tempfile.mkdtemp(prefix='bcat_safari_')
-    fname = os.path.basename(path)
-    dst = os.path.join(tmp, fname)
-    try:
-        for suffix in ('', '-wal', '-shm'):
-            src = path + suffix
-            if os.path.exists(src):
-                shutil.copyfile(src, dst + suffix)
-        conn = sqlite3.connect(dst)
-        conn.row_factory = sqlite3.Row
-        return conn
-    except Exception as e:
-        log.error(f'Could not open {path}: {e}')
-        shutil.rmtree(tmp, ignore_errors=True)
-        return None
+    return open_db_copy(path, prefix='bcat_safari_')
 
 
 def default_paths(safari_root: str) -> dict:

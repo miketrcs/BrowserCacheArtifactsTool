@@ -120,7 +120,7 @@ Chrome does not require Full Disk Access.
 
 Open your browser to `http://localhost:8502` after launching `run.sh`.
 
-1. Select **Chrome** or **Safari** in the sidebar
+1. Select **Chrome**, **Edge**, **Firefox**, or **Safari** in the sidebar
 2. Confirm or edit the profile path
 3. Click **Load Profile**
 4. Browse the five tabs: History · Downloads · Cookies · Bookmarks · Cached Images
@@ -200,7 +200,7 @@ BrowserCacheArtifactsTool/
   - `Cache.db` — Apple-service thumbnails and icons
   URLs are recovered by parsing binary metadata files in `Records/`.
 - **Chrome/Edge version detection** is automatic based on database schema. Tested against Chrome/Edge v1–v150.
-- **AVIF image support** — both Chrome/Edge and Safari caches now detect and display AVIF images (requires Pillow with libavif).
+- **AVIF image support** — all browser caches detect and display AVIF images (requires Pillow with libavif).
 
 ---
 
